@@ -32,7 +32,7 @@ jobs:
       - name: Check Build Output
         run: ls -la public/build
 
-      # 6️⃣ Pull latest code di VPS
+      # 6️⃣ Pull latest code di VPS (reset hard agar tidak diverge)
       - name: Pull latest code on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -41,12 +41,10 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /var/www/POS-Harumnya
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
 
       # 7️⃣ Upload build folder to VPS
-      # NOTE: Hapus dulu di VPS tidak perlu — overwrite: true sudah cukup
-      # NOTE: source harus "public/build/" (dengan trailing slash) agar isinya
-      #       yang diupload, bukan folder "build" di dalam "public/public/build"
       - name: Upload build folder to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -77,7 +75,7 @@ jobs:
             php artisan route:cache
             php artisan view:cache
 
-            # Fix permissions (sudoers must allow this — see note below)
+            # Fix permissions
             sudo chown -R www-data:www-data storage bootstrap/cache public/build
             sudo chmod -R 775 storage bootstrap/cache public/build
 
