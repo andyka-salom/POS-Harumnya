@@ -32,7 +32,7 @@ jobs:
       - name: Check Build Output
         run: ls -la public/build
 
-      # 6️⃣ Pull latest code di VPS (reset hard agar tidak diverge)
+      # 6️⃣ Pull latest code di VPS
       - name: Pull latest code on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -40,7 +40,12 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            set -e
             cd /var/www/POS-Harumnya
+
+            # Fix ownership dulu SEBELUM git reset agar tidak Permission Denied
+            sudo chown -R $USER:$USER storage bootstrap/cache
+
             git fetch origin main
             git reset --hard origin/main
 
@@ -75,7 +80,7 @@ jobs:
             php artisan route:cache
             php artisan view:cache
 
-            # Fix permissions
+            # Kembalikan ownership ke www-data setelah deploy selesai
             sudo chown -R www-data:www-data storage bootstrap/cache public/build
             sudo chmod -R 775 storage bootstrap/cache public/build
 
