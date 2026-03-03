@@ -1,0 +1,89 @@
+name: Deploy Laravel Vite React
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Setup Node
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 3️⃣ Install NPM Dependencies
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      # 4️⃣ Build Vite (Production)
+      - name: Build Assets (Vite)
+        run: npm run build
+
+      # 5️⃣ Debug build output
+      - name: Check Build Output
+        run: ls -la public/build
+
+      # 6️⃣ Pull latest code di VPS
+      - name: Pull latest code on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/www/POS-Harumnya
+            git pull origin main
+
+      # 7️⃣ Upload build folder to VPS
+      # NOTE: Hapus dulu di VPS tidak perlu — overwrite: true sudah cukup
+      # NOTE: source harus "public/build/" (dengan trailing slash) agar isinya
+      #       yang diupload, bukan folder "build" di dalam "public/public/build"
+      - name: Upload build folder to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "public/build"
+          target: "/var/www/POS-Harumnya"
+          overwrite: true
+
+      # 8️⃣ Finalize deployment
+      - name: Install Composer & Optimize
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /var/www/POS-Harumnya
+
+            # Install composer production
+            composer install --no-dev --optimize-autoloader
+
+            # Clear & rebuild cache
+            php artisan optimize:clear
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+
+            # Fix permissions (sudoers must allow this — see note below)
+            sudo chown -R www-data:www-data storage bootstrap/cache public/build
+            sudo chmod -R 775 storage bootstrap/cache public/build
+
+            # Restart services
+            sudo systemctl restart php8.4-fpm
+            sudo systemctl reload nginx
+
+            # Verify build uploaded correctly
+            ls -la public/build
