@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,6 +13,7 @@ use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__ . '/../routes/web.php',
+        api: __DIR__ . '/../routes/api.php',         // ← tambahkan api routes
         commands: __DIR__ . '/../routes/console.php',
         health: '/up',
     )
@@ -28,12 +30,27 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
+
+        // 401 — Unauthenticated (token tidak ada / expired)
+        $exceptions->render(function (AuthenticationException $exception, Request $request) {
+            if ($request->expectsJson() || str_starts_with($request->path(), 'api/')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated.',
+                    'data'    => null,
+                ], 401);
+            }
+        });
+
+        // 403 — Unauthorized (role/permission tidak cukup)
         $exceptions->render(function (UnauthorizedException $exception, Request $request) {
             $message = __('Anda tidak memiliki izin untuk mengakses halaman tersebut.');
 
-            if ($request->expectsJson()) {
+            if ($request->expectsJson() || str_starts_with($request->path(), 'api/')) {
                 return response()->json([
+                    'success' => false,
                     'message' => $message,
+                    'data'    => null,
                 ], 403);
             }
 
@@ -41,4 +58,5 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->back(fallback: route('dashboard'))
                 ->with('error', $message);
         });
+
     })->create();
