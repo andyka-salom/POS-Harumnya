@@ -95,9 +95,11 @@ class PackagingMaterial extends Model
 
     public function scopeSearch($query, string $search)
     {
+        $term = mb_strtolower($search);
+
         return $query->where(fn($q) =>
-            $q->where('name', 'like', "%{$search}%")
-              ->orWhere('code', 'like', "%{$search}%")
+            $q->whereRaw('LOWER(name) LIKE ?', ["%{$term}%"])
+              ->orWhereRaw('LOWER(code) LIKE ?', ["%{$term}%"])
         );
     }
 

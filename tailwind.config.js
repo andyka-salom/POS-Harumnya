@@ -25,33 +25,44 @@ export default {
                 ],
             },
             colors: {
-                // Primary - Indigo
+                // Primary - Deep Teal (sidebar background, main dark color)
                 primary: {
-                    50: "#eef2ff",
-                    100: "#e0e7ff",
-                    200: "#c7d2fe",
-                    300: "#a5b4fc",
-                    400: "#818cf8",
-                    500: "#6366f1",
-                    600: "#4f46e5",
-                    700: "#4338ca",
-                    800: "#3730a3",
-                    900: "#312e81",
-                    950: "#1e1b4b",
+                    50: "#e6f4f6",
+                    100: "#c0e3e9",
+                    200: "#8dcad5",
+                    300: "#52afc0",
+                    400: "#2b98ae",
+                    500: "#0e8299",
+                    600: "#0a6e82",
+                    700: "#075a6b",
+                    800: "#054656",
+                    900: "#0d2d3a",  // main sidebar dark bg
+                    950: "#071a22",
                 },
-                // Accent - Cyan
+                // Accent - Bright Cyan/Teal (active states, highlights, badges)
                 accent: {
-                    50: "#ecfeff",
-                    100: "#cffafe",
-                    200: "#a5f3fc",
-                    300: "#67e8f9",
-                    400: "#22d3ee",
-                    500: "#06b6d4",
-                    600: "#0891b2",
-                    700: "#0e7490",
-                    800: "#155e75",
-                    900: "#164e63",
-                    950: "#083344",
+                    50: "#e0faf8",
+                    100: "#b3f3ee",
+                    200: "#7deae3",
+                    300: "#3dddd6",
+                    400: "#16d0c9",  // bright active highlight
+                    500: "#0ab8b0",
+                    600: "#089b94",
+                    700: "#067d77",
+                    800: "#04605b",
+                    900: "#024441",
+                    950: "#012928",
+                },
+                // Sidebar - Dark Navy Teal shades for sidebar layers
+                sidebar: {
+                    bg: "#0d2d3a",        // main sidebar background
+                    surface: "#0f3545",   // slightly lighter surface
+                    hover: "#134050",     // hover state
+                    active: "#1a5265",    // active/selected item bg
+                    border: "#1b4d5e",    // subtle borders
+                    muted: "#4d8a9a",     // muted text
+                    text: "#b8d8e0",      // default sidebar text
+                    heading: "#6bb8c8",   // section headings
                 },
                 // Success - Emerald
                 success: {
@@ -104,8 +115,8 @@ export default {
                 128: "32rem",
             },
             minHeight: {
-                touch: "2.75rem", // 44px - minimum touch target
-                "touch-lg": "3rem", // 48px - comfortable touch target
+                touch: "2.75rem",
+                "touch-lg": "3rem",
             },
             minWidth: {
                 touch: "2.75rem",
@@ -115,9 +126,11 @@ export default {
                 "4xl": "2rem",
             },
             boxShadow: {
-                glow: "0 0 20px rgba(99, 102, 241, 0.3)",
-                "glow-lg": "0 0 40px rgba(99, 102, 241, 0.4)",
+                glow: "0 0 20px rgba(14, 130, 153, 0.35)",
+                "glow-lg": "0 0 40px rgba(14, 130, 153, 0.45)",
+                "glow-accent": "0 0 20px rgba(22, 208, 201, 0.4)",
                 "inner-lg": "inset 0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                sidebar: "4px 0 24px rgba(7, 26, 34, 0.6)",
             },
             animation: {
                 "slide-in": "slideIn 0.2s ease-out",

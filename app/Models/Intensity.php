@@ -17,32 +17,34 @@ class Intensity extends Model
         'name',
         'oil_ratio',
         'alcohol_ratio',
-        'concentration_percentage',
         'sort_order',
-        'is_active'
+        'is_active',
     ];
 
     protected $casts = [
-        'is_active'                => 'boolean',
-        'oil_ratio'                => 'float',
-        'alcohol_ratio'            => 'float',
-        'concentration_percentage' => 'float',
-        'sort_order'               => 'integer',
-        'created_at'               => 'datetime',
-        'updated_at'               => 'datetime',
+        'is_active'  => 'boolean',
+        'sort_order' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     // -------------------------------------------------------------------------
     // Relationships
     // -------------------------------------------------------------------------
 
-    /**
-     * Volume oil & alcohol yang sudah dikalibrasi per ukuran botol
-     * Contoh: EDT 30ml → oil=10, alcohol=20 | EDT 50ml → oil=15, alcohol=35
-     */
     public function sizeQuantities(): HasMany
     {
         return $this->hasMany(IntensitySizeQuantity::class);
+    }
+
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class, 'intensity_id');
+    }
+
+    public function sizePrices(): HasMany
+    {
+        return $this->hasMany(IntensitySizePrice::class, 'intensity_id');
     }
 
     // -------------------------------------------------------------------------
@@ -55,42 +57,36 @@ class Intensity extends Model
     }
 
     /**
-     * Ratio display dalam format "oil : alkohol"
-     * Contoh: oil=33.3, alkoh=66.7 => "1 : 2"
+     * Ratio display — kembalikan oil_ratio apa adanya (sudah dalam format "X : Y")
      */
     public function getRatioDisplayAttribute(): string
     {
-        $oil   = (float) $this->oil_ratio;
-        $alkoh = (float) $this->alcohol_ratio;
-
-        if ($alkoh == 0) return "{$oil} : 0";
-
-        $oilInt   = (int) round($oil * 10);
-        $alkohInt = (int) round($alkoh * 10);
-        $gcd      = $this->gcd($oilInt, $alkohInt);
-
-        $o = $oilInt / $gcd;
-        $a = $alkohInt / $gcd;
-
-        $oStr = ($o == (int) $o) ? (int) $o : $o;
-        $aStr = ($a == (int) $a) ? (int) $a : $a;
-
-        return "{$oStr} : {$aStr}";
+        return $this->oil_ratio ?? '1 : 1';
     }
 
     /**
-     * Concentration level berdasarkan oil_ratio:
-     *   EDT    (1:2) → oil ~33%  → moderate
-     *   EDP    (1:1) → oil ~50%  → strong
-     *   Extrait(2:1) → oil ~67%  → extreme
+     * Hitung oil percentage dari string ratio untuk keperluan tampilan & bar.
+     * Contoh: "1 : 2" → 33.33, "1 : 1" → 50, "2 : 1" → 66.67
+     */
+    public function getOilPercentageAttribute(): float
+    {
+        return $this->parseOilPercentage($this->oil_ratio);
+    }
+
+    /**
+     * Concentration level berdasarkan oil_ratio string:
+     *   "1 : 4" → light   (Body Mist ~20%)
+     *   "1 : 2" → moderate (EDT ~33%)
+     *   "1 : 1" → strong   (EDP ~50%)
+     *   "2 : 1" → extreme  (Extrait ~67%)
      */
     public function getConcentrationLevelAttribute(): string
     {
-        $oil = (float) $this->oil_ratio;
+        $pct = $this->parseOilPercentage($this->oil_ratio);
 
-        if ($oil >= 67) return 'extreme';
-        if ($oil >= 50) return 'strong';
-        if ($oil >= 33) return 'moderate';
+        if ($pct >= 60) return 'extreme';
+        if ($pct >= 42) return 'strong';
+        if ($pct >= 25) return 'moderate';
         return 'light';
     }
 
@@ -125,39 +121,29 @@ class Intensity extends Model
     public function scopeOrdered($query)
     {
         return $query->orderBy('sort_order', 'asc')
-                     ->orderBy('oil_ratio', 'desc');
-    }
-
-    // -------------------------------------------------------------------------
-    // Boot
-    // -------------------------------------------------------------------------
-
-    protected static function boot(): void
-    {
-        parent::boot();
-
-        static::saving(function (Intensity $intensity) {
-            $intensity->alcohol_ratio             = round(100 - $intensity->oil_ratio, 4);
-            $intensity->concentration_percentage  = $intensity->oil_ratio;
-        });
+                     ->orderBy('name', 'asc');
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function gcd(int $a, int $b): int
+    /**
+     * Parse string ratio "X : Y" → oil percentage (float)
+     * Contoh: "1 : 2" → 33.33, "2 : 1" → 66.67
+     */
+    public function parseOilPercentage(string $ratio): float
     {
-        return $b === 0 ? $a : $this->gcd($b, $a % $b);
-    }
-        public function products(): HasMany
-    {
-        return $this->hasMany(Product::class, 'intensity_id');
-    }
+        // Format: "X : Y" atau "X:Y"
+        $parts = preg_split('/\s*:\s*/', trim($ratio));
 
-    public function sizePrices(): HasMany
-    {
-        return $this->hasMany(IntensitySizePrice::class, 'intensity_id');
-    }
+        if (count($parts) !== 2) return 50.0;
 
+        $o = (float) $parts[0];
+        $a = (float) $parts[1];
+
+        if (($o + $a) == 0) return 50.0;
+
+        return round(($o / ($o + $a)) * 100, 4);
+    }
 }

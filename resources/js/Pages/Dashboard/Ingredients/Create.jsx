@@ -8,7 +8,7 @@ import {
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
 
-const INGREDIENT_TYPE_CONFIG = {
+const TYPE_CFG = {
     oil:     { label: "Fragrance Oil", desc: "Bibit parfum, essential oil, dll" },
     alcohol: { label: "Alkohol",       desc: "Ethanol, isopropyl alcohol, dll" },
     other:   { label: "Lainnya",       desc: "Air suling, fixative, dll" },
@@ -21,6 +21,37 @@ const UNITS = [
     { value: "liter", label: "liter" },
     { value: "pcs",   label: "pcs — pieces" },
 ];
+
+// Custom select tanpa double arrow
+function Select({ label, required, value, onChange, errors, children }) {
+    return (
+        <div>
+            {label && (
+                <label className="block text-sm font-medium mb-1.5 dark:text-slate-300">
+                    {label} {required && <span className="text-red-500">*</span>}
+                </label>
+            )}
+            <div className="relative">
+                <select
+                    value={value}
+                    onChange={onChange}
+                    required={required}
+                    className={`appearance-none w-full h-10 pl-3 pr-8 rounded-xl border bg-white dark:bg-slate-950 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all ${
+                        errors ? "border-red-400" : "border-slate-300 dark:border-slate-700"
+                    }`}
+                >
+                    {children}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center">
+                    <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                </div>
+            </div>
+            {errors && <p className="text-red-500 text-xs mt-1">{errors}</p>}
+        </div>
+    );
+}
 
 export default function Create({ categories }) {
     const [preview, setPreview] = useState(null);
@@ -36,7 +67,7 @@ export default function Create({ categories }) {
         is_active:              true,
     });
 
-    // Kategori yang dipilih — untuk tampilkan info ingredient_type
+    // Tipe scaling otomatis dari kategori yang dipilih
     const selectedCategory = categories.find(c => c.id === data.ingredient_category_id);
 
     const handleImage = (e) => {
@@ -67,26 +98,29 @@ export default function Create({ categories }) {
             <div className="max-w-5xl mx-auto px-4 py-6">
                 <Link
                     href={route("ingredients.index")}
-                    className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 mb-5 font-medium transition-colors"
+                    className="flex items-center gap-2 text-sm text-slate-500 hover:text-teal-600 dark:hover:text-teal-400 mb-5 font-medium transition-colors"
                 >
                     <IconArrowLeft size={16} /> Kembali ke Daftar Bahan
                 </Link>
 
-                <div className="mb-6">
-                    <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Tambah Bahan Baku</h1>
-                    <p className="text-sm text-slate-500 mt-1">Isi data bahan baku baru untuk digunakan dalam formula parfum</p>
+                <div className="flex items-center gap-3 mb-6">
+                    <div className="p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg text-teal-600">
+                        <IconFlask size={28} />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Tambah Bahan Baku</h1>
+                        <p className="text-sm text-slate-500 mt-0.5">Isi data bahan baku baru untuk digunakan dalam formula parfum</p>
+                    </div>
                 </div>
 
                 <form onSubmit={submit} encType="multipart/form-data">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-                        {/* ── Kolom Kiri (2/3) ─────────────────────────────────── */}
+                        {/* ── Kolom Kiri ──────────────────────────────────── */}
                         <div className="lg:col-span-2 space-y-6">
-
-                            {/* Informasi Utama */}
-                            <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
                                 <h2 className="text-base font-bold mb-5 flex items-center gap-2 text-slate-800 dark:text-white">
-                                    <IconFlask size={18} className="text-emerald-600" />
+                                    <IconFlask size={18} className="text-teal-600" />
                                     Informasi Bahan Baku
                                 </h2>
 
@@ -123,16 +157,13 @@ export default function Create({ categories }) {
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    {/* Kategori */}
                                     <div>
-                                        <label className="block text-sm font-medium mb-1.5 dark:text-slate-300">
-                                            Kategori <span className="text-red-500">*</span>
-                                        </label>
-                                        <select
+                                        <Select
+                                            label="Kategori"
+                                            required
                                             value={data.ingredient_category_id}
                                             onChange={e => setData("ingredient_category_id", e.target.value)}
-                                            className="w-full h-10 rounded-xl border-slate-300 dark:bg-slate-950 dark:border-slate-700 text-sm"
-                                            required
+                                            errors={errors.ingredient_category_id}
                                         >
                                             <option value="">Pilih Kategori</option>
                                             {categories.map(c => (
@@ -140,40 +171,32 @@ export default function Create({ categories }) {
                                                     {c.name} ({c.code})
                                                 </option>
                                             ))}
-                                        </select>
-                                        {errors.ingredient_category_id && (
-                                            <p className="text-red-500 text-xs mt-1">{errors.ingredient_category_id}</p>
-                                        )}
-                                        {/* Info tipe dari kategori */}
+                                        </Select>
+                                        {/* Tipe scaling otomatis dari kategori */}
                                         {selectedCategory && (
                                             <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-slate-500">
                                                 <span>Tipe scaling:</span>
-                                                <span className="font-bold text-emerald-600">
-                                                    {INGREDIENT_TYPE_CONFIG[selectedCategory.ingredient_type]?.label ?? "—"}
+                                                <span className="font-bold text-teal-600">
+                                                    {TYPE_CFG[selectedCategory.ingredient_type]?.label ?? "—"}
                                                 </span>
-                                                <span>— {INGREDIENT_TYPE_CONFIG[selectedCategory.ingredient_type]?.desc}</span>
+                                                <span className="text-slate-400">
+                                                    (otomatis dari kategori)
+                                                </span>
                                             </div>
                                         )}
                                     </div>
 
-                                    {/* Satuan */}
-                                    <div>
-                                        <label className="block text-sm font-medium mb-1.5 dark:text-slate-300">
-                                            Satuan <span className="text-red-500">*</span>
-                                        </label>
-                                        <select
-                                            value={data.unit}
-                                            onChange={e => setData("unit", e.target.value)}
-                                            className="w-full h-10 rounded-xl border-slate-300 dark:bg-slate-950 dark:border-slate-700 text-sm"
-                                        >
-                                            {UNITS.map(u => (
-                                                <option key={u.value} value={u.value}>{u.label}</option>
-                                            ))}
-                                        </select>
-                                        {errors.unit && (
-                                            <p className="text-red-500 text-xs mt-1">{errors.unit}</p>
-                                        )}
-                                    </div>
+                                    <Select
+                                        label="Satuan"
+                                        required
+                                        value={data.unit}
+                                        onChange={e => setData("unit", e.target.value)}
+                                        errors={errors.unit}
+                                    >
+                                        {UNITS.map(u => (
+                                            <option key={u.value} value={u.value}>{u.label}</option>
+                                        ))}
+                                    </Select>
                                 </div>
 
                                 <div>
@@ -184,7 +207,7 @@ export default function Create({ categories }) {
                                         rows={3}
                                         value={data.description}
                                         onChange={e => setData("description", e.target.value)}
-                                        className="w-full rounded-xl border-slate-300 dark:bg-slate-950 dark:border-slate-700 text-sm"
+                                        className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 dark:text-white text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all resize-none"
                                         placeholder="Keterangan tambahan bahan baku..."
                                     />
                                     {errors.description && (
@@ -194,28 +217,28 @@ export default function Create({ categories }) {
                             </div>
 
                             {/* Info HPP */}
-                            <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-start gap-3">
-                                <IconInfoCircle size={18} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                            <div className="bg-teal-50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900 rounded-xl p-4 flex items-start gap-3">
+                                <IconInfoCircle size={18} className="text-teal-500 flex-shrink-0 mt-0.5" />
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-0.5">
+                                    <p className="text-sm font-semibold text-teal-800 dark:text-teal-300 mb-0.5">
                                         HPP / Biaya Rata-rata (WAC)
                                     </p>
-                                    <p className="text-xs text-slate-500">
-                                        Harga Pokok Produksi akan otomatis terisi dan diperbarui menggunakan metode
-                                        <strong className="text-slate-600"> Weighted Average Cost (WAC)</strong> setiap
+                                    <p className="text-xs text-teal-700 dark:text-teal-400">
+                                        Harga Pokok Produksi otomatis terisi via metode
+                                        <strong> Weighted Average Cost (WAC)</strong> setiap
                                         kali Purchase Order diterima. Tidak perlu dan tidak bisa diisi manual.
                                     </p>
                                 </div>
                             </div>
                         </div>
 
-                        {/* ── Kolom Kanan (1/3) ────────────────────────────────── */}
+                        {/* ── Kolom Kanan ─────────────────────────────────── */}
                         <div className="space-y-5">
                             {/* Upload Foto */}
-                            <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
                                 <h3 className="font-bold mb-3 text-sm dark:text-white">Foto Bahan</h3>
                                 <div
-                                    className="w-full aspect-square rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center relative overflow-hidden cursor-pointer hover:border-emerald-400 transition-colors group"
+                                    className="w-full aspect-square rounded-xl bg-slate-50 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center relative overflow-hidden cursor-pointer hover:border-teal-400 transition-colors group"
                                     onClick={() => document.getElementById('image-upload').click()}
                                 >
                                     {preview ? (
@@ -232,9 +255,7 @@ export default function Create({ categories }) {
                                     ) : (
                                         <div className="flex flex-col items-center gap-2 text-slate-400">
                                             <IconPhoto size={36} />
-                                            <span className="text-xs text-center px-4">
-                                                Klik untuk upload foto
-                                            </span>
+                                            <span className="text-xs text-center px-4">Klik untuk upload foto</span>
                                         </div>
                                     )}
                                     <input
@@ -245,22 +266,18 @@ export default function Create({ categories }) {
                                         className="hidden"
                                     />
                                 </div>
-                                <p className="text-[10px] text-slate-400 mt-2 text-center">
-                                    JPG, PNG, WebP · Maks 2MB
-                                </p>
+                                <p className="text-[10px] text-slate-400 mt-2 text-center">JPG, PNG, WebP · Maks 2MB</p>
                                 {errors.image && (
                                     <p className="text-red-500 text-xs mt-1 text-center">{errors.image}</p>
                                 )}
                             </div>
 
                             {/* Toggle Status */}
-                            <div className="bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl p-5 shadow-sm">
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <span className="text-sm font-bold dark:text-white">Status Aktif</span>
-                                        <p className="text-[11px] text-slate-400 mt-0.5">
-                                            Bahan muncul di semua menu
-                                        </p>
+                                        <p className="text-[11px] text-slate-400 mt-0.5">Bahan muncul di semua menu</p>
                                     </div>
                                     <label className="relative inline-flex items-center cursor-pointer">
                                         <input
@@ -269,22 +286,20 @@ export default function Create({ categories }) {
                                             onChange={e => setData("is_active", e.target.checked)}
                                             className="sr-only peer"
                                         />
-                                        <div className="w-11 h-6 bg-slate-200 peer-checked:bg-emerald-600 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-400 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5" />
+                                        <div className="w-11 h-6 bg-slate-200 peer-checked:bg-teal-500 rounded-full peer peer-focus:ring-2 peer-focus:ring-teal-400 dark:peer-focus:ring-teal-800 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5" />
                                     </label>
                                 </div>
                             </div>
 
-                            {/* Submit */}
                             <button
                                 type="submit"
                                 disabled={processing}
-                                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-2xl shadow-lg shadow-emerald-200 dark:shadow-none flex items-center justify-center gap-2 transition-colors"
+                                className="w-full py-3.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold rounded-2xl shadow-lg shadow-teal-500/30 flex items-center justify-center gap-2 transition-colors"
                             >
-                                {processing ? (
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <IconDeviceFloppy size={20} />
-                                )}
+                                {processing
+                                    ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    : <IconDeviceFloppy size={20} />
+                                }
                                 {processing ? "Menyimpan..." : "Simpan Bahan Baku"}
                             </button>
 

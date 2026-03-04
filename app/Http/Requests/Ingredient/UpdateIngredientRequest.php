@@ -14,24 +14,21 @@ class UpdateIngredientRequest extends FormRequest
 
     public function rules(): array
     {
-        $id = $this->ingredient->id;
+        $id = $this->route('ingredient')->id;
 
         return [
             'ingredient_category_id' => ['required', 'uuid', 'exists:ingredient_categories,id'],
-            'code'                   => [
-                'required',
-                'string',
-                'max:100',
-                Rule::unique('ingredients')->ignore($id)->whereNull('deleted_at')
+            'code' => [
+                'required', 'string', 'max:100',
+                Rule::unique('ingredients')->ignore($id)->whereNull('deleted_at'),
             ],
-            'name'                   => ['required', 'string', 'max:255'],
-            'unit'                   => ['required', 'string', 'max:50'],
-            'cost_price'             => ['nullable', 'numeric', 'min:0'],
-            'effective_date'         => ['nullable', 'date'],
-            'price_note'             => ['nullable', 'string', 'max:500'],
-            'is_compound'            => ['boolean'],
-            'description'            => ['nullable', 'string'],
-            'is_active'              => ['boolean'],
+            'name'        => ['required', 'string', 'max:255'],
+            'unit'        => ['required', 'string', Rule::in(['ml', 'gr', 'kg', 'liter', 'pcs'])],
+            'sort_order'  => ['nullable', 'integer', 'min:0'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            // image nullable — jika tidak dikirim, foto lama tetap dipertahankan
+            'image'       => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'is_active'   => ['boolean'],
         ];
     }
 
@@ -41,10 +38,7 @@ class UpdateIngredientRequest extends FormRequest
             'ingredient_category_id' => 'kategori bahan',
             'code'                   => 'kode bahan',
             'name'                   => 'nama bahan',
-            'cost_price'             => 'harga pokok',
             'unit'                   => 'satuan',
-            'effective_date'         => 'tanggal berlaku',
-            'price_note'             => 'catatan harga',
         ];
     }
 }

@@ -1,28 +1,46 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import DashboardLayout from "@/Layouts/DashboardLayout";
 import { Head, Link, router, useForm } from "@inertiajs/react";
 import {
     IconCirclePlus, IconFlask, IconPencil, IconTrash,
     IconPhoto, IconCheck, IconX, IconLock, IconTag,
-    IconSearch, IconFilter,
+    IconFilter, IconAlertTriangle,
 } from "@tabler/icons-react";
 import Search from "@/Components/Dashboard/Search";
 import Pagination from "@/Components/Dashboard/Pagination";
-import Button from "@/Components/Dashboard/Button";
 import Input from "@/Components/Dashboard/Input";
 import toast from "react-hot-toast";
 
 const fmt = (v = 0) => Number(v || 0).toLocaleString("id-ID");
 
-const INGREDIENT_TYPE_CONFIG = {
-    oil:     { label: "Fragrance Oil", color: "bg-purple-50 text-purple-700 border border-purple-200" },
-    alcohol: { label: "Alkohol",       color: "bg-blue-50 text-blue-700 border border-blue-200" },
-    other:   { label: "Lainnya",       color: "bg-slate-100 text-slate-600 border border-slate-200" },
+const TYPE_CFG = {
+    oil:     { label: "Fragrance Oil", color: "bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/30 dark:text-purple-300 dark:border-purple-800" },
+    alcohol: { label: "Alkohol",       color: "bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-800" },
+    other:   { label: "Lainnya",       color: "bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700" },
 };
 
-// ─── Badge ────────────────────────────────────────────────────────────────────
-function IngredientTypeBadge({ type }) {
-    const cfg = INGREDIENT_TYPE_CONFIG[type] ?? INGREDIENT_TYPE_CONFIG.other;
+// ─── Reusable custom select ────────────────────────────────────────────────────
+function Select({ value, onChange, children, className = "" }) {
+    return (
+        <div className="relative">
+            <select
+                value={value}
+                onChange={onChange}
+                className={`appearance-none w-full h-10 pl-3 pr-8 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all ${className}`}
+            >
+                {children}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center">
+                <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+            </div>
+        </div>
+    );
+}
+
+function TypeBadge({ type }) {
+    const cfg = TYPE_CFG[type] ?? TYPE_CFG.other;
     return (
         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${cfg.color}`}>
             {cfg.label}
@@ -30,25 +48,82 @@ function IngredientTypeBadge({ type }) {
     );
 }
 
-// ─── Modal Kategori ───────────────────────────────────────────────────────────
+// ─── Delete Confirm Modal ──────────────────────────────────────────────────────
+function DeleteModal({ show, title, message, onConfirm, onClose, loading }) {
+    if (!show) return null;
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-sm p-6 shadow-xl border dark:border-slate-800">
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-950/30 flex items-center justify-center flex-shrink-0">
+                        <IconAlertTriangle size={20} className="text-red-500" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 dark:text-white text-base">{title}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{message}</p>
+                    </div>
+                </div>
+                <div className="flex gap-2 justify-end mt-6">
+                    <button
+                        onClick={onClose}
+                        disabled={loading}
+                        className="px-4 py-2 text-sm font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        onClick={onConfirm}
+                        disabled={loading}
+                        className="px-4 py-2 text-sm font-bold rounded-xl bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-60 flex items-center gap-2"
+                    >
+                        {loading && <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                        Hapus
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Category Modal ────────────────────────────────────────────────────────────
 function CategoryModal({ show, onClose, category = null }) {
     const isEdit = !!category;
-    const { data, setData, post, put, processing, reset, errors } = useForm({
-        code:             category?.code             || "",
-        name:             category?.name             || "",
-        ingredient_type:  category?.ingredient_type  || "other",
-        description:      category?.description      || "",
-        sort_order:       category?.sort_order        ?? 0,
-        is_active:        category?.is_active         ?? true,
+
+    const { data, setData, post, put, processing, reset, errors, clearErrors } = useForm({
+        code:            "",
+        name:            "",
+        ingredient_type: "other",
+        description:     "",
+        sort_order:      0,
+        is_active:       true,
     });
+
+    // Re-populate form whenever category prop changes (fix: existing data tidak muncul)
+    useEffect(() => {
+        if (show) {
+            if (category) {
+                setData({
+                    code:            category.code            || "",
+                    name:            category.name            || "",
+                    ingredient_type: category.ingredient_type || "other",
+                    description:     category.description     || "",
+                    sort_order:      category.sort_order      ?? 0,
+                    is_active:       category.is_active       ?? true,
+                });
+            } else {
+                reset();
+                clearErrors();
+            }
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [show, category?.id]);
 
     const submit = (e) => {
         e.preventDefault();
         const opts = {
             onSuccess: () => {
                 onClose();
-                reset();
-                toast.success(isEdit ? "Kategori diperbarui" : "Kategori ditambahkan");
+                toast.success(isEdit ? "Kategori berhasil diperbarui" : "Kategori berhasil ditambahkan");
             },
             onError: () => toast.error("Periksa kembali input"),
         };
@@ -66,7 +141,7 @@ function CategoryModal({ show, onClose, category = null }) {
                     <h3 className="text-lg font-bold dark:text-white">
                         {isEdit ? "Edit Kategori" : "Tambah Kategori"}
                     </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
                         <IconX size={20} />
                     </button>
                 </div>
@@ -100,18 +175,18 @@ function CategoryModal({ show, onClose, category = null }) {
                         placeholder="Fragrance Oil"
                     />
 
-                    {/* Ingredient Type */}
+                    {/* Ingredient Type — otomatis dari pilihan ini, tidak perlu field terpisah di bahan */}
                     <div>
                         <label className="block text-sm font-medium mb-1.5 dark:text-slate-300">
-                            Tipe Bahan <span className="text-red-500">*</span>
+                            Tipe Scaling <span className="text-red-500">*</span>
                         </label>
                         <div className="grid grid-cols-3 gap-2">
-                            {Object.entries(INGREDIENT_TYPE_CONFIG).map(([val, cfg]) => (
+                            {Object.entries(TYPE_CFG).map(([val, cfg]) => (
                                 <label key={val}
                                     className={`cursor-pointer rounded-xl border-2 p-3 text-center transition-all ${
                                         data.ingredient_type === val
-                                            ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
-                                            : "border-slate-200 dark:border-slate-700 hover:border-slate-300"
+                                            ? "border-teal-500 bg-teal-50 dark:bg-teal-950/30"
+                                            : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
                                     }`}
                                 >
                                     <input
@@ -131,7 +206,7 @@ function CategoryModal({ show, onClose, category = null }) {
                             <p className="text-red-500 text-xs mt-1">{errors.ingredient_type}</p>
                         )}
                         <p className="text-[10px] text-slate-400 mt-1.5">
-                            Digunakan untuk mapping scaling resep ke IntensitySizeQuantity.
+                            Tipe ini otomatis berlaku ke semua bahan dalam kategori ini.
                         </p>
                     </div>
 
@@ -141,7 +216,7 @@ function CategoryModal({ show, onClose, category = null }) {
                             rows={2}
                             value={data.description}
                             onChange={e => setData("description", e.target.value)}
-                            className="w-full rounded-xl border-slate-300 dark:bg-slate-950 dark:border-slate-700 text-sm"
+                            className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 dark:text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all"
                             placeholder="Keterangan kategori..."
                         />
                     </div>
@@ -152,25 +227,25 @@ function CategoryModal({ show, onClose, category = null }) {
                             id="cat_is_active"
                             checked={data.is_active}
                             onChange={e => setData("is_active", e.target.checked)}
-                            className="rounded text-emerald-600 w-4 h-4"
+                            className="rounded text-teal-600 w-4 h-4 accent-teal-600"
                         />
                         <label htmlFor="cat_is_active" className="text-sm dark:text-slate-300 cursor-pointer">
                             Status Aktif
                         </label>
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="flex justify-end gap-2 pt-2 border-t dark:border-slate-800">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+                            className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
                         >
                             Batal
                         </button>
                         <button
                             type="submit"
                             disabled={processing}
-                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2"
+                            className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2"
                         >
                             {processing && (
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -188,20 +263,32 @@ function CategoryModal({ show, onClose, category = null }) {
 export default function Index({ ingredients, categories, filters }) {
     const [activeTab, setActiveTab] = useState("items");
     const [catModal,  setCatModal]  = useState({ show: false, data: null });
+    const [deleteModal, setDeleteModal] = useState({ show: false, type: null, item: null, loading: false });
 
-    const handleDeleteCategory = (cat) => {
-        if (!confirm(`Hapus kategori "${cat.name}"?`)) return;
-        router.delete(route("ingredients.categories.destroy", cat.id), {
-            onSuccess: () => toast.success("Kategori dihapus"),
-            onError:   () => toast.error("Kategori masih memiliki bahan baku"),
-        });
-    };
+    const confirmDelete = (type, item) => setDeleteModal({ show: true, type, item, loading: false });
+    const closeDelete   = () => setDeleteModal({ show: false, type: null, item: null, loading: false });
 
-    const handleDeleteIngredient = (item) => {
-        if (!confirm(`Hapus bahan "${item.name}"?`)) return;
-        router.delete(route("ingredients.destroy", item.id), {
-            onSuccess: () => toast.success("Bahan dihapus"),
-            onError:   () => toast.error("Bahan masih digunakan di formula/resep"),
+    const handleDelete = () => {
+        const { type, item } = deleteModal;
+        setDeleteModal(prev => ({ ...prev, loading: true }));
+
+        const routeName = type === "category"
+            ? "ingredients.categories.destroy"
+            : "ingredients.destroy";
+
+        router.delete(route(routeName, item.id), {
+            onSuccess: () => {
+                closeDelete();
+                toast.success(type === "category" ? "Kategori dihapus" : "Bahan dihapus");
+            },
+            onError: () => {
+                closeDelete();
+                toast.error(
+                    type === "category"
+                        ? "Kategori masih memiliki bahan baku"
+                        : "Bahan masih digunakan di formula/resep"
+                );
+            },
         });
     };
 
@@ -213,12 +300,12 @@ export default function Index({ ingredients, categories, filters }) {
             <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <div className="p-2 bg-emerald-600 rounded-lg text-white">
+                        <div className="p-2 bg-teal-600 rounded-lg text-white shadow-lg shadow-teal-500/30">
                             <IconFlask size={20} />
                         </div>
                         Bahan Baku
                     </h1>
-                    <p className="text-sm text-slate-500 mt-1">
+                    <p className="text-sm text-slate-500 mt-1 ml-11">
                         Kelola bahan baku parfum dan kategorisasinya
                     </p>
                 </div>
@@ -226,14 +313,14 @@ export default function Index({ ingredients, categories, filters }) {
                     {activeTab === "items" ? (
                         <Link
                             href={route("ingredients.create")}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors shadow-sm"
+                            className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl transition-colors shadow-lg shadow-teal-500/30"
                         >
                             <IconCirclePlus size={18} /> Tambah Bahan
                         </Link>
                     ) : (
                         <button
                             onClick={() => setCatModal({ show: true, data: null })}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl transition-colors shadow-sm"
+                            className="flex items-center gap-2 px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl transition-colors shadow-lg shadow-teal-500/30"
                         >
                             <IconCirclePlus size={18} /> Tambah Kategori
                         </button>
@@ -252,15 +339,15 @@ export default function Index({ ingredients, categories, filters }) {
                         onClick={() => setActiveTab(tab.key)}
                         className={`pb-3 text-sm font-bold transition-all border-b-2 flex items-center gap-2 ${
                             activeTab === tab.key
-                                ? "border-emerald-600 text-emerald-600"
-                                : "border-transparent text-slate-500 hover:text-slate-700"
+                                ? "border-teal-600 text-teal-600"
+                                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                         }`}
                     >
                         {tab.label}
                         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                             activeTab === tab.key
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-slate-100 text-slate-500"
+                                ? "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-400"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-500"
                         }`}>
                             {tab.count}
                         </span>
@@ -268,10 +355,9 @@ export default function Index({ ingredients, categories, filters }) {
                 ))}
             </div>
 
-            {/* ── TAB: Items ─────────────────────────────────────────────────────── */}
+            {/* ── TAB: Items ─────────────────────────────────────────────────── */}
             {activeTab === "items" && (
                 <>
-                    {/* Filter Bar */}
                     <div className="mb-5 flex flex-col sm:flex-row gap-3 items-center justify-between">
                         <div className="w-full sm:w-96">
                             <Search
@@ -282,22 +368,20 @@ export default function Index({ ingredients, categories, filters }) {
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <IconFilter size={15} className="text-slate-400" />
-                            <select
-                                className="rounded-xl border-slate-200 dark:border-slate-700 text-sm dark:bg-slate-900 h-10 px-3"
+                            <Select
                                 value={filters.category_id || ""}
                                 onChange={e => router.get(
                                     route("ingredients.index"),
-                                    { category_id: e.target.value, search: filters.search },
+                                    { category_id: e.target.value || undefined, search: filters.search },
                                     { preserveState: true }
                                 )}
+                                className="w-52"
                             >
                                 <option value="">Semua Kategori</option>
                                 {categories.map(c => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name}
-                                    </option>
+                                    <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
-                            </select>
+                            </Select>
                         </div>
                     </div>
 
@@ -323,11 +407,11 @@ export default function Index({ ingredients, categories, filters }) {
                                     {ingredients.data.length === 0 ? (
                                         <tr>
                                             <td colSpan={7} className="px-5 py-16 text-center">
-                                                <IconFlask size={40} className="mx-auto text-slate-200 mb-3" />
+                                                <IconFlask size={40} className="mx-auto text-slate-200 dark:text-slate-700 mb-3" />
                                                 <p className="text-slate-400 text-sm font-medium">Belum ada bahan baku</p>
                                                 <Link
                                                     href={route("ingredients.create")}
-                                                    className="inline-flex items-center gap-1.5 mt-3 text-sm text-emerald-600 hover:text-emerald-700 font-semibold"
+                                                    className="inline-flex items-center gap-1.5 mt-3 text-sm text-teal-600 hover:text-teal-700 font-semibold"
                                                 >
                                                     <IconCirclePlus size={16} /> Tambah Bahan Baku
                                                 </Link>
@@ -338,7 +422,6 @@ export default function Index({ ingredients, categories, filters }) {
                                             key={item.id}
                                             className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors"
                                         >
-                                            {/* Bahan */}
                                             <td className="px-5 py-3.5">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -348,74 +431,55 @@ export default function Index({ ingredients, categories, filters }) {
                                                         }
                                                     </div>
                                                     <div>
-                                                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                                                            {item.name}
-                                                        </div>
-                                                        <div className="text-[10px] font-mono text-slate-400">
-                                                            {item.code}
-                                                        </div>
+                                                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">{item.name}</div>
+                                                        <div className="text-[10px] font-mono text-slate-400">{item.code}</div>
                                                     </div>
                                                 </div>
                                             </td>
-
-                                            {/* Kategori */}
                                             <td className="px-5 py-3.5">
-                                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 font-semibold">
+                                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-400 font-semibold">
                                                     {item.category?.name ?? "—"}
                                                 </span>
                                             </td>
-
-                                            {/* Tipe Scaling */}
                                             <td className="px-5 py-3.5">
-                                                {item.category?.ingredient_type ? (
-                                                    <IngredientTypeBadge type={item.category.ingredient_type} />
-                                                ) : (
-                                                    <span className="text-slate-300 text-xs">—</span>
-                                                )}
+                                                {item.category?.ingredient_type
+                                                    ? <TypeBadge type={item.category.ingredient_type} />
+                                                    : <span className="text-slate-300 text-xs">—</span>
+                                                }
                                             </td>
-
-                                            {/* Satuan */}
                                             <td className="px-5 py-3.5 text-xs text-slate-500 uppercase font-mono font-medium">
                                                 {item.unit}
                                             </td>
-
-                                            {/* HPP (WAC) — readonly */}
                                             <td className="px-5 py-3.5 text-right">
                                                 {parseFloat(item.average_cost) > 0 ? (
                                                     <div>
                                                         <span className="text-sm font-mono font-semibold text-slate-700 dark:text-slate-300">
                                                             Rp {fmt(Math.round(item.average_cost))}
                                                         </span>
-                                                        <span className="text-[10px] text-slate-400 ml-1">
-                                                            /{item.unit}
-                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 ml-1">/{item.unit}</span>
                                                     </div>
                                                 ) : (
-                                                    <span className="text-xs text-slate-300 italic">Belum ada PO</span>
+                                                    <span className="text-xs text-slate-300 dark:text-slate-600 italic">Belum ada PO</span>
                                                 )}
                                             </td>
-
-                                            {/* Status */}
                                             <td className="px-5 py-3.5 text-center">
                                                 {item.is_active
-                                                    ? <IconCheck size={18} className="text-emerald-500 mx-auto" />
-                                                    : <IconX size={18} className="text-slate-300 mx-auto" />
+                                                    ? <IconCheck size={18} className="text-teal-500 mx-auto" />
+                                                    : <IconX size={18} className="text-slate-300 dark:text-slate-600 mx-auto" />
                                                 }
                                             </td>
-
-                                            {/* Aksi */}
                                             <td className="px-5 py-3.5 text-right">
                                                 <div className="flex justify-end gap-2">
                                                     <Link
                                                         href={route("ingredients.edit", item.id)}
-                                                        className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-lg transition-colors"
+                                                        className="p-1.5 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-950/50 text-amber-600 rounded-lg transition-colors"
                                                         title="Edit"
                                                     >
                                                         <IconPencil size={15} />
                                                     </Link>
                                                     <button
-                                                        onClick={() => handleDeleteIngredient(item)}
-                                                        className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg transition-colors"
+                                                        onClick={() => confirmDelete("ingredient", item)}
+                                                        className="p-1.5 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50 text-red-500 rounded-lg transition-colors"
                                                         title="Hapus"
                                                     >
                                                         <IconTrash size={15} />
@@ -435,7 +499,7 @@ export default function Index({ ingredients, categories, filters }) {
                 </>
             )}
 
-            {/* ── TAB: Categories ────────────────────────────────────────────────── */}
+            {/* ── TAB: Categories ────────────────────────────────────────────── */}
             {activeTab === "categories" && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
@@ -460,32 +524,30 @@ export default function Index({ ingredients, categories, filters }) {
                                 ) : categories.map(cat => (
                                     <tr key={cat.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
                                         <td className="px-6 py-4 text-xs text-slate-400 font-mono">{cat.sort_order}</td>
-                                        <td className="px-6 py-4 font-mono text-xs text-emerald-600 font-bold">{cat.code}</td>
+                                        <td className="px-6 py-4 font-mono text-xs text-teal-600 dark:text-teal-400 font-bold">{cat.code}</td>
                                         <td className="px-6 py-4 text-sm font-semibold text-slate-800 dark:text-white">{cat.name}</td>
-                                        <td className="px-6 py-4">
-                                            <IngredientTypeBadge type={cat.ingredient_type} />
-                                        </td>
+                                        <td className="px-6 py-4"><TypeBadge type={cat.ingredient_type} /></td>
                                         <td className="px-6 py-4 text-center">
                                             {cat.is_active
-                                                ? <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-600 rounded-full">Aktif</span>
-                                                : <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-400 rounded-full">Nonaktif</span>
+                                                ? <span className="px-2 py-0.5 text-[10px] font-bold bg-teal-50 dark:bg-teal-950/30 text-teal-600 dark:text-teal-400 rounded-full">Aktif</span>
+                                                : <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-full">Nonaktif</span>
                                             }
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <div className="flex justify-end gap-3">
                                                 <button
                                                     onClick={() => setCatModal({ show: true, data: cat })}
-                                                    className="text-slate-400 hover:text-emerald-600 transition-colors"
+                                                    className="p-1.5 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 text-amber-600 rounded-lg transition-colors"
                                                     title="Edit kategori"
                                                 >
-                                                    <IconPencil size={16} />
+                                                    <IconPencil size={15} />
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteCategory(cat)}
-                                                    className="text-slate-400 hover:text-red-500 transition-colors"
+                                                    onClick={() => confirmDelete("category", cat)}
+                                                    className="p-1.5 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 text-red-500 rounded-lg transition-colors"
                                                     title="Hapus kategori"
                                                 >
-                                                    <IconTrash size={16} />
+                                                    <IconTrash size={15} />
                                                 </button>
                                             </div>
                                         </td>
@@ -499,40 +561,57 @@ export default function Index({ ingredients, categories, filters }) {
                     <div className="space-y-4">
                         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
                             <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
-                                <IconTag size={16} className="text-emerald-600" />
+                                <IconTag size={16} className="text-teal-600" />
                                 Tentang Tipe Scaling
                             </h3>
                             <div className="space-y-3">
-                                {Object.entries(INGREDIENT_TYPE_CONFIG).map(([type, cfg]) => (
+                                {Object.entries(TYPE_CFG).map(([type, cfg]) => (
                                     <div key={type} className="flex items-start gap-2">
-                                        <IngredientTypeBadge type={type} />
+                                        <TypeBadge type={type} />
                                         <p className="text-xs text-slate-500 flex-1">
-                                            {type === 'oil'     && "→ Di-scale ke oil_quantity dari IntensitySizeQuantity"}
-                                            {type === 'alcohol' && "→ Di-scale ke alcohol_quantity dari IntensitySizeQuantity"}
-                                            {type === 'other'   && "→ Di-scale ke other_quantity (air suling, fixative, dll)"}
+                                            {type === 'oil'     && "→ Di-scale ke oil_quantity"}
+                                            {type === 'alcohol' && "→ Di-scale ke alcohol_quantity"}
+                                            {type === 'other'   && "→ Di-scale ke other_quantity"}
                                         </p>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
+                        <div className="bg-teal-50 dark:bg-teal-950/20 rounded-xl border border-teal-100 dark:border-teal-900 p-5">
+                            <h3 className="font-bold text-sm text-teal-800 dark:text-teal-300 mb-2">💡 Tipe Scaling Otomatis</h3>
+                            <p className="text-xs text-teal-700 dark:text-teal-400">
+                                Tipe scaling diatur di level <strong>kategori</strong>, bukan per bahan.
+                                Semua bahan dalam satu kategori otomatis mengikuti tipe kategorinya.
+                            </p>
+                        </div>
                         <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 p-5">
                             <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300 mb-2">Catatan</h3>
                             <ul className="text-xs text-slate-500 space-y-1.5 list-disc list-inside">
-                                <li>Kategori digunakan untuk mengelompokkan bahan saat pembuatan resep</li>
-                                <li>Tipe Scaling menentukan cara bahan di-scale ke ukuran botol berbeda</li>
                                 <li>Kategori yang memiliki bahan aktif tidak dapat dihapus</li>
+                                <li>Ubah tipe kategori akan mempengaruhi semua bahan di dalamnya</li>
                             </ul>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Category Modal */}
+            {/* Modals */}
             <CategoryModal
                 show={catModal.show}
                 onClose={() => setCatModal({ show: false, data: null })}
                 category={catModal.data}
+            />
+
+            <DeleteModal
+                show={deleteModal.show}
+                loading={deleteModal.loading}
+                title={deleteModal.type === "category" ? `Hapus Kategori "${deleteModal.item?.name}"?` : `Hapus Bahan "${deleteModal.item?.name}"?`}
+                message={deleteModal.type === "category"
+                    ? "Kategori yang memiliki bahan baku tidak dapat dihapus."
+                    : "Bahan yang masih digunakan di formula tidak dapat dihapus."
+                }
+                onConfirm={handleDelete}
+                onClose={closeDelete}
             />
         </>
     );

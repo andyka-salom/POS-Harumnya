@@ -24,7 +24,7 @@ class IntensityController extends Controller
     public function index(Request $request): Response
     {
         $intensities = Intensity::query()
-            ->select(['id', 'code', 'name', 'oil_ratio', 'alcohol_ratio', 'concentration_percentage', 'sort_order', 'is_active', 'created_at'])
+            ->select(['id', 'code', 'name', 'oil_ratio', 'alcohol_ratio', 'sort_order', 'is_active', 'created_at'])
             ->when($request->filled('search'), fn ($q) => $q->search($request->search))
             ->when(
                 $request->has('is_active') && $request->is_active !== '',
@@ -34,20 +34,19 @@ class IntensityController extends Controller
             ->paginate($request->input('per_page', 12))
             ->withQueryString()
             ->through(fn ($intensity) => [
-                'id'                       => $intensity->id,
-                'code'                     => $intensity->code,
-                'name'                     => $intensity->name,
-                'oil_ratio'                => (float) $intensity->oil_ratio,
-                'alcohol_ratio'            => (float) $intensity->alcohol_ratio,
-                'ratio_display'            => $intensity->ratio_display,
-                'concentration_percentage' => (float) $intensity->concentration_percentage,
-                'sort_order'               => $intensity->sort_order,
-                'is_active'                => $intensity->is_active,
-                'status_label'             => $intensity->status_label,
-                'concentration_level'      => $intensity->concentration_level,
-                'created_at'               => $intensity->created_at->format('d M Y'),
-                // Tampilkan qty per size untuk preview di card
-                'size_quantities'          => $intensity->sizeQuantities()
+                'id'                  => $intensity->id,
+                'code'                => $intensity->code,
+                'name'                => $intensity->name,
+                'oil_ratio'           => $intensity->oil_ratio,       // string "1 : 2"
+                'alcohol_ratio'       => $intensity->alcohol_ratio,   // string "2 : 1"
+                'ratio_display'       => $intensity->ratio_display,
+                'oil_percentage'      => $intensity->oil_percentage,  // float untuk bar chart
+                'sort_order'          => $intensity->sort_order,
+                'is_active'           => $intensity->is_active,
+                'status_label'        => $intensity->status_label,
+                'concentration_level' => $intensity->concentration_level,
+                'created_at'          => $intensity->created_at->format('d M Y'),
+                'size_quantities'     => $intensity->sizeQuantities()
                     ->with('size')
                     ->get()
                     ->map(fn ($q) => [
@@ -79,8 +78,6 @@ class IntensityController extends Controller
             ->orderBy('volume_ml')
             ->get(['id', 'name', 'volume_ml']);
 
-        // Default quantity templates untuk setiap size
-        // User bisa override sesuai kebutuhan
         return Inertia::render('Dashboard/Intensities/Create', [
             'sizes' => $sizes,
         ]);
@@ -99,7 +96,6 @@ class IntensityController extends Controller
 
             $intensity = Intensity::create($request->validated());
 
-            // Simpan size quantities jika ada
             if ($request->filled('size_quantities')) {
                 $this->saveSizeQuantities($intensity->id, $request->size_quantities);
             }
@@ -130,13 +126,11 @@ class IntensityController extends Controller
             ->orderBy('volume_ml')
             ->get(['id', 'name', 'volume_ml']);
 
-        // Load existing size quantities untuk intensity ini
         $existingQty = IntensitySizeQuantity::where('intensity_id', $intensity->id)
             ->with('size')
             ->get()
             ->keyBy('size_id');
 
-        // Build size_quantities array: merge sizes dengan existing qty
         $sizeQuantities = $sizes->map(function ($size) use ($existingQty) {
             $qty = $existingQty->get($size->id);
             return [
@@ -151,14 +145,13 @@ class IntensityController extends Controller
 
         return Inertia::render('Dashboard/Intensities/Edit', [
             'intensity' => [
-                'id'                       => $intensity->id,
-                'code'                     => $intensity->code,
-                'name'                     => $intensity->name,
-                'oil_ratio'                => (float) $intensity->oil_ratio,
-                'alcohol_ratio'            => (float) $intensity->alcohol_ratio,
-                'concentration_percentage' => (float) $intensity->concentration_percentage,
-                'sort_order'               => $intensity->sort_order,
-                'is_active'                => $intensity->is_active,
+                'id'           => $intensity->id,
+                'code'         => $intensity->code,
+                'name'         => $intensity->name,
+                'oil_ratio'    => $intensity->oil_ratio,     // string "1 : 2"
+                'alcohol_ratio'=> $intensity->alcohol_ratio, // string "2 : 1"
+                'sort_order'   => $intensity->sort_order,
+                'is_active'    => $intensity->is_active,
             ],
             'sizes'           => $sizes,
             'size_quantities' => $sizeQuantities,
@@ -178,7 +171,6 @@ class IntensityController extends Controller
 
             $intensity->update($request->validated());
 
-            // Update size quantities
             if ($request->filled('size_quantities')) {
                 $this->saveSizeQuantities($intensity->id, $request->size_quantities);
             }
@@ -207,7 +199,6 @@ class IntensityController extends Controller
     {
         try {
             DB::beginTransaction();
-            // IntensitySizeQuantity akan terhapus otomatis (cascade)
             $intensity->delete();
             DB::commit();
 
@@ -268,46 +259,36 @@ class IntensityController extends Controller
     // Private Helpers
     // -------------------------------------------------------------------------
 
-    /**
-     * Validasi size_quantities: oil + alcohol harus = total_volume (= volume_ml size)
-     */
     private function validateSizeQuantities(Request $request): void
     {
         if (!$request->filled('size_quantities')) return;
 
         $validator = Validator::make($request->all(), [
-            'size_quantities'                   => 'array',
-            'size_quantities.*.size_id'         => 'required|exists:sizes,id',
-            'size_quantities.*.oil_quantity'    => 'required|integer|min:0',
-            'size_quantities.*.alcohol_quantity'=> 'required|integer|min:0',
-            'size_quantities.*.total_volume'    => 'required|integer|min:1',
+            'size_quantities'                    => 'array',
+            'size_quantities.*.size_id'          => 'required|exists:sizes,id',
+            'size_quantities.*.oil_quantity'     => 'required|integer|min:0',
+            'size_quantities.*.alcohol_quantity' => 'required|integer|min:0',
+            'size_quantities.*.total_volume'     => 'required|integer|min:1',
         ]);
 
         if ($validator->fails()) {
             abort(422, $validator->errors()->first());
         }
 
-        // Validasi: oil + alcohol = total_volume
-        foreach ($request->size_quantities as $idx => $qty) {
-            $sum = (int)$qty['oil_quantity'] + (int)$qty['alcohol_quantity'];
-            if ($sum !== (int)$qty['total_volume']) {
+        foreach ($request->size_quantities as $qty) {
+            $sum = (int) $qty['oil_quantity'] + (int) $qty['alcohol_quantity'];
+            if ($sum !== (int) $qty['total_volume']) {
                 abort(422, "Ukuran {$qty['total_volume']}ml: oil ({$qty['oil_quantity']}) + alcohol ({$qty['alcohol_quantity']}) = {$sum}, harus = {$qty['total_volume']}");
             }
         }
     }
 
-    /**
-     * Upsert size quantities — delete lama, insert baru
-     */
     private function saveSizeQuantities(string $intensityId, array $sizeQuantities): void
     {
-        // Hapus semua qty lama untuk intensity ini
         IntensitySizeQuantity::where('intensity_id', $intensityId)->delete();
 
-        // Insert baru
         foreach ($sizeQuantities as $qty) {
-            // Skip jika semua 0 (belum diisi)
-            if ((int)$qty['oil_quantity'] === 0 && (int)$qty['alcohol_quantity'] === 0) {
+            if ((int) $qty['oil_quantity'] === 0 && (int) $qty['alcohol_quantity'] === 0) {
                 continue;
             }
 

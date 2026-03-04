@@ -10,7 +10,8 @@ export default function Edit({ intensity, sizes, size_quantities }) {
             <Head title={`Edit Intensitas: ${intensity.name}`} />
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <div className="mb-6">
-                    <Link href={route("intensities.index")}
+                    <Link
+                        href={route("intensities.index")}
                         className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors mb-4"
                     >
                         <IconArrowLeft size={18} strokeWidth={2} />

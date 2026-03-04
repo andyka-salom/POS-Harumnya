@@ -62,7 +62,6 @@ return new class extends Migration
             $table->string('phone', 50)->nullable();
             $table->string('email')->nullable();
             $table->text('address')->nullable();
-            $table->string('tax_id')->nullable()->comment('NPWP');
 
             $table->enum('payment_term', [
                 'cash',

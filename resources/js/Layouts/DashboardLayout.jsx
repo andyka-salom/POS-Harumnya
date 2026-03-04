@@ -3,7 +3,7 @@ import Sidebar from "@/Components/Dashboard/Sidebar";
 import Navbar from "@/Components/Dashboard/Navbar";
 import { Toaster } from "react-hot-toast";
 import { useTheme } from "@/Context/ThemeSwitcherContext";
-import { router, usePage } from "@inertiajs/react";
+import { usePage } from "@inertiajs/react";
 
 export default function AppLayout({ children }) {
     const { darkMode, themeSwitcher } = useTheme();
@@ -18,10 +18,19 @@ export default function AppLayout({ children }) {
         localStorage.setItem("sidebarOpen", sidebarOpen);
     }, [sidebarOpen]);
 
-    // Scroll ke top setiap kali URL berubah (url dari usePage() reactive)
+    // Scroll ke top hanya jika PATHNAME berubah (bukan query string / hash)
+    const prevPathname = useRef(null);
     useEffect(() => {
-        if (mainRef.current) {
-            mainRef.current.scrollTop = 0;
+        try {
+            const pathname = new URL(url, window.location.origin).pathname;
+            if (prevPathname.current !== null && prevPathname.current !== pathname) {
+                if (mainRef.current) {
+                    mainRef.current.scrollTop = 0;
+                }
+            }
+            prevPathname.current = pathname;
+        } catch {
+            // abaikan jika URL tidak valid
         }
     }, [url]);
 

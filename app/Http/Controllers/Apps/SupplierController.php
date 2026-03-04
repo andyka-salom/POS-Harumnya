@@ -14,9 +14,6 @@ use Illuminate\Http\RedirectResponse;
 
 class SupplierController extends Controller
 {
-    /**
-     * Default pagination size
-     */
     private const DEFAULT_PER_PAGE = 12;
 
     /**
@@ -49,7 +46,7 @@ class SupplierController extends Controller
                 'payment_term',
                 'credit_limit',
                 'is_active',
-                'created_at'
+                'created_at',
             ])
             ->orderBy($request->input('sort', 'name'), $request->input('direction', 'asc'))
             ->paginate($perPage)
@@ -91,11 +88,9 @@ class SupplierController extends Controller
     public function store(StoreSupplierRequest $request): RedirectResponse
     {
         try {
-            $supplier = DB::transaction(function () use ($request) {
-                return Supplier::create($request->validated());
-            });
+            $supplier = DB::transaction(fn() => Supplier::create($request->validated()));
 
-            Log::info('Supplier created successfully', [
+            Log::info('Supplier created', [
                 'supplier_id' => $supplier->id,
                 'code'        => $supplier->code,
                 'user_id'     => auth()->id(),
@@ -108,7 +103,6 @@ class SupplierController extends Controller
         } catch (\Exception $e) {
             Log::error('Failed to create supplier', [
                 'error'   => $e->getMessage(),
-                'trace'   => $e->getTraceAsString(),
                 'user_id' => auth()->id(),
             ]);
 
@@ -132,7 +126,6 @@ class SupplierController extends Controller
                 'phone'          => $supplier->phone,
                 'email'          => $supplier->email,
                 'address'        => $supplier->address,
-                'tax_id'         => $supplier->tax_id,
                 'payment_term'   => $supplier->payment_term,
                 'credit_limit'   => $supplier->credit_limit,
                 'is_active'      => $supplier->is_active,
@@ -147,11 +140,9 @@ class SupplierController extends Controller
     public function update(StoreSupplierRequest $request, Supplier $supplier): RedirectResponse
     {
         try {
-            DB::transaction(function () use ($request, $supplier) {
-                $supplier->update($request->validated());
-            });
+            DB::transaction(fn() => $supplier->update($request->validated()));
 
-            Log::info('Supplier updated successfully', [
+            Log::info('Supplier updated', [
                 'supplier_id' => $supplier->id,
                 'code'        => $supplier->code,
                 'user_id'     => auth()->id(),
@@ -165,7 +156,6 @@ class SupplierController extends Controller
             Log::error('Failed to update supplier', [
                 'supplier_id' => $supplier->id,
                 'error'       => $e->getMessage(),
-                'trace'       => $e->getTraceAsString(),
                 'user_id'     => auth()->id(),
             ]);
 
@@ -176,16 +166,14 @@ class SupplierController extends Controller
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Remove the specified resource from storage (soft delete).
      */
     public function destroy(Supplier $supplier): RedirectResponse
     {
         try {
-            DB::transaction(function () use ($supplier) {
-                $supplier->delete();
-            });
+            DB::transaction(fn() => $supplier->delete());
 
-            Log::info('Supplier deleted successfully', [
+            Log::info('Supplier soft-deleted', [
                 'supplier_id' => $supplier->id,
                 'code'        => $supplier->code,
                 'user_id'     => auth()->id(),
@@ -197,7 +185,6 @@ class SupplierController extends Controller
             Log::error('Failed to delete supplier', [
                 'supplier_id' => $supplier->id,
                 'error'       => $e->getMessage(),
-                'trace'       => $e->getTraceAsString(),
                 'user_id'     => auth()->id(),
             ]);
 
@@ -206,17 +193,16 @@ class SupplierController extends Controller
     }
 
     /**
-     * Restore soft deleted supplier.
+     * Restore soft-deleted supplier.
      */
     public function restore(string $id): RedirectResponse
     {
         try {
             DB::transaction(function () use ($id) {
-                $supplier = Supplier::withTrashed()->findOrFail($id);
-                $supplier->restore();
+                Supplier::withTrashed()->findOrFail($id)->restore();
             });
 
-            Log::info('Supplier restored successfully', [
+            Log::info('Supplier restored', [
                 'supplier_id' => $id,
                 'user_id'     => auth()->id(),
             ]);
@@ -240,10 +226,10 @@ class SupplierController extends Controller
     public function toggleStatus(Supplier $supplier): RedirectResponse
     {
         try {
-            DB::transaction(function () use ($supplier) {
-                $supplier->update(['is_active' => ! $supplier->is_active]);
-            });
+            DB::transaction(fn() => $supplier->update(['is_active' => ! $supplier->is_active]));
 
+            // Refresh model untuk mendapatkan nilai terbaru
+            $supplier->refresh();
             $status = $supplier->is_active ? 'diaktifkan' : 'dinonaktifkan';
 
             Log::info('Supplier status toggled', [
@@ -265,27 +251,18 @@ class SupplierController extends Controller
         }
     }
 
-    /**
-     * Get payment term options.
-     */
+    // ─── Helpers ──────────────────────────────────────────────────────────
+
     private function getPaymentTermOptions(): array
     {
-        return [
-            ['value' => 'cash',      'label' => 'Tunai (Cash)'],
-            ['value' => 'credit_7',  'label' => 'Kredit 7 Hari'],
-            ['value' => 'credit_14', 'label' => 'Kredit 14 Hari'],
-            ['value' => 'credit_30', 'label' => 'Kredit 30 Hari'],
-            ['value' => 'credit_60', 'label' => 'Kredit 60 Hari'],
-        ];
+        return collect(Supplier::PAYMENT_TERMS)
+            ->map(fn($label, $value) => ['value' => $value, 'label' => $label])
+            ->values()
+            ->toArray();
     }
 
-    /**
-     * Get per page value from request.
-     */
     private function getPerPage(Request $request): int
     {
-        $perPage = (int) $request->input('per_page', self::DEFAULT_PER_PAGE);
-
-        return min(max($perPage, 10), 100);
+        return min(max((int) $request->input('per_page', self::DEFAULT_PER_PAGE), 10), 100);
     }
 }

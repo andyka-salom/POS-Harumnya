@@ -12,93 +12,95 @@ import {
     IconRuler,
     IconCheck,
     IconAlertTriangle,
+    IconEqual,
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Preset Konsentrasi
 // ---------------------------------------------------------------------------
 const CONCENTRATION_PRESETS = [
-    { label: "Body Mist", ratio: "1 : 4", oil: 20,   color: "text-slate-500 dark:text-slate-400",   badge: "bg-slate-100 text-slate-700" },
-    { label: "EDT",       ratio: "1 : 2", oil: 33.3, color: "text-blue-600 dark:text-blue-400",     badge: "bg-blue-100 text-blue-700" },
-    { label: "EDP",       ratio: "1 : 1", oil: 50,   color: "text-orange-600 dark:text-orange-400", badge: "bg-orange-100 text-orange-700" },
-    { label: "Extrait",   ratio: "2 : 1", oil: 66.7, color: "text-red-600 dark:text-red-400",       badge: "bg-red-100 text-red-700" },
+    { label: "Body Mist", oilNum: 1, alcNum: 4 },
+    { label: "EDT",       oilNum: 1, alcNum: 2 },
+    { label: "EDP",       oilNum: 1, alcNum: 1 },
+    { label: "Extrait",   oilNum: 2, alcNum: 1 },
 ];
 
-function getConcentrationInfo(oilRatio) {
-    if (oilRatio >= 60) return CONCENTRATION_PRESETS[3];
-    if (oilRatio >= 42) return CONCENTRATION_PRESETS[2];
-    if (oilRatio >= 25) return CONCENTRATION_PRESETS[1];
-    return CONCENTRATION_PRESETS[0];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function buildRatioString(oil, alc) {
+    return `${oil} : ${alc}`;
 }
 
-function getRatioString(oil) {
-    if (Math.abs(oil - 66.7) < 1) return "2 : 1";
-    if (Math.abs(oil - 50)   < 1) return "1 : 1";
-    if (Math.abs(oil - 33.3) < 1) return "1 : 2";
-    if (Math.abs(oil - 20)   < 1) return "1 : 4";
-    const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
-    const o = Math.round(oil * 10);
-    const a = Math.round((100 - oil) * 10);
-    const g = gcd(o, a);
-    return `${o / g} : ${a / g}`;
-}
-
-/**
- * Hitung default oil/alcohol qty berdasarkan ratio & volume
- * Menghasilkan integer yang pas (tidak desimal)
- */
-function calcDefaultQty(oilRatio, volumeMl) {
-    const oil     = Math.round((oilRatio / 100) * volumeMl);
+function calcDefaultQty(oilNum, alcNum, volumeMl) {
+    const total = oilNum + alcNum;
+    if (total === 0) return { oil: 0, alcohol: volumeMl };
+    const oil     = Math.round((oilNum / total) * volumeMl);
     const alcohol = volumeMl - oil;
     return { oil, alcohol };
 }
 
+function getRatioFromString(str) {
+    const parts = (str || "1 : 2").split(/\s*:\s*/);
+    return {
+        oilNum: parseInt(parts[0]) || 1,
+        alcNum: parseInt(parts[1]) || 2,
+    };
+}
+
+function getPresetLabel(oilNum, alcNum) {
+    const found = CONCENTRATION_PRESETS.find(p => p.oilNum === oilNum && p.alcNum === alcNum);
+    return found?.label ?? null;
+}
+
 // ---------------------------------------------------------------------------
-// SizeQuantityRow — 1 baris per ukuran botol
+// SizeQuantityRow
 // ---------------------------------------------------------------------------
-function SizeQuantityRow({ item, oilRatio, onChange, errors }) {
+function SizeQuantityRow({ item, oilNum, alcNum, onChange }) {
     const isValid = (item.oil_quantity + item.alcohol_quantity) === item.total_volume;
     const sum     = item.oil_quantity + item.alcohol_quantity;
 
     const handleAutoFill = () => {
-        const { oil, alcohol } = calcDefaultQty(oilRatio, item.total_volume);
+        const { oil, alcohol } = calcDefaultQty(oilNum, alcNum, item.total_volume);
         onChange({ ...item, oil_quantity: oil, alcohol_quantity: alcohol });
     };
 
     return (
-        <div className={`p-4 rounded-xl border-2 transition-all ${isValid ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10" : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10"}`}>
-            {/* Header row */}
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
-                        <IconRuler size={16} className="text-purple-600 dark:text-purple-400" />
+        <div className={`rounded-2xl border-2 overflow-hidden transition-all ${
+            isValid
+                ? "border-teal-200 dark:border-teal-800"
+                : "border-red-200 dark:border-red-800"
+        }`}>
+            {/* Header baris */}
+            <div className={`px-4 py-3 flex items-center justify-between ${
+                isValid
+                    ? "bg-teal-50 dark:bg-teal-900/20"
+                    : "bg-red-50 dark:bg-red-900/20"
+            }`}>
+                <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center">
+                        <IconRuler size={14} className="text-teal-600 dark:text-teal-400" />
                     </div>
-                    <div>
-                        <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">
-                            {item.size_name}
-                        </span>
-                        <span className="text-xs text-slate-400 ml-2">({item.total_volume} ml)</span>
-                    </div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">{item.size_name}</span>
+                    <span className="text-xs text-slate-400 font-medium bg-white dark:bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                        {item.total_volume} ml
+                    </span>
                 </div>
-
                 <div className="flex items-center gap-2">
-                    {/* Status indicator */}
                     {isValid ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-400">
-                            <IconCheck size={14} strokeWidth={2.5} /> OK
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-teal-700 dark:text-teal-400 bg-teal-100 dark:bg-teal-900/40 px-2 py-0.5 rounded-lg">
+                            <IconCheck size={12} strokeWidth={3} /> Sesuai
                         </span>
                     ) : (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 dark:text-red-400">
-                            <IconAlertTriangle size={14} /> {sum} / {item.total_volume}
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/40 px-2 py-0.5 rounded-lg">
+                            <IconAlertTriangle size={12} /> {sum}/{item.total_volume}
                         </span>
                     )}
-
-                    {/* Auto-fill button */}
                     <button
                         type="button"
                         onClick={handleAutoFill}
-                        className="text-xs px-2.5 py-1 rounded-lg bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 font-semibold hover:bg-primary-200 dark:hover:bg-primary-900/70 transition-all"
+                        className="text-xs px-3 py-1.5 rounded-lg bg-teal-600 text-white font-bold hover:bg-teal-700 transition-all shadow-sm"
                     >
                         Auto
                     </button>
@@ -106,85 +108,79 @@ function SizeQuantityRow({ item, oilRatio, onChange, errors }) {
             </div>
 
             {/* Input fields */}
-            <div className="grid grid-cols-3 gap-3">
-                {/* Oil */}
-                <div>
-                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
-                        <IconFlask size={12} className="text-primary-600" />
-                        Bibit (ml)
-                    </label>
-                    <input
-                        type="number"
-                        min="0"
-                        max={item.total_volume}
-                        value={item.oil_quantity}
-                        onChange={e => {
-                            const oil     = Math.max(0, parseInt(e.target.value) || 0);
-                            const alcohol = item.total_volume - oil;
-                            onChange({ ...item, oil_quantity: oil, alcohol_quantity: Math.max(0, alcohol) });
-                        }}
-                        className="w-full rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-sm font-bold focus:ring-2 focus:ring-primary-500"
-                    />
-                </div>
+            <div className="p-4 bg-white dark:bg-slate-900">
+                <div className="flex items-end gap-3">
+                    {/* Bibit */}
+                    <div className="flex-1">
+                        <label className="block text-[11px] font-bold text-teal-600 dark:text-teal-400 mb-1.5 uppercase tracking-widest flex items-center gap-1">
+                            <IconFlask size={11} /> Bibit (ml)
+                        </label>
+                        <input
+                            type="number" min="0" max={item.total_volume}
+                            value={item.oil_quantity}
+                            onChange={e => {
+                                const oil     = Math.max(0, parseInt(e.target.value) || 0);
+                                const alcohol = Math.max(0, item.total_volume - oil);
+                                onChange({ ...item, oil_quantity: oil, alcohol_quantity: alcohol });
+                            }}
+                            className="w-full rounded-xl border-2 border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xl font-black text-center px-3 py-3 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
+                        />
+                    </div>
 
-                {/* Alcohol */}
-                <div>
-                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
-                        <IconBottle size={12} className="text-blue-600" />
-                        Alkohol (ml)
-                    </label>
-                    <input
-                        type="number"
-                        min="0"
-                        max={item.total_volume}
-                        value={item.alcohol_quantity}
-                        onChange={e => {
-                            const alcohol = Math.max(0, parseInt(e.target.value) || 0);
-                            const oil     = item.total_volume - alcohol;
-                            onChange({ ...item, alcohol_quantity: alcohol, oil_quantity: Math.max(0, oil) });
-                        }}
-                        className="w-full rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 text-sm font-bold focus:ring-2 focus:ring-primary-500"
-                    />
-                </div>
+                    {/* Separator */}
+                    <div className="pb-3">
+                        <span className="text-2xl font-black text-slate-300 dark:text-slate-600">+</span>
+                    </div>
 
-                {/* Total (readonly) */}
-                <div>
-                    <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 block">
-                        Total (ml)
-                    </label>
-                    <div className={`w-full rounded-lg border-2 px-3 py-2 text-sm font-bold text-center ${isValid ? "border-green-300 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400" : "border-red-300 bg-red-50 dark:bg-red-900/20 text-red-600"}`}>
-                        {item.total_volume} ml
+                    {/* Alkohol */}
+                    <div className="flex-1">
+                        <label className="block text-[11px] font-bold text-blue-500 dark:text-blue-400 mb-1.5 uppercase tracking-widest flex items-center gap-1">
+                            <IconBottle size={11} /> Alkohol (ml)
+                        </label>
+                        <input
+                            type="number" min="0" max={item.total_volume}
+                            value={item.alcohol_quantity}
+                            onChange={e => {
+                                const alcohol = Math.max(0, parseInt(e.target.value) || 0);
+                                const oil     = Math.max(0, item.total_volume - alcohol);
+                                onChange({ ...item, alcohol_quantity: alcohol, oil_quantity: oil });
+                            }}
+                            className="w-full rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-xl font-black text-center px-3 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                        />
+                    </div>
+
+                    {/* Separator */}
+                    <div className="pb-3">
+                        <IconEqual size={20} className="text-slate-300 dark:text-slate-600" />
+                    </div>
+
+                    {/* Total (readonly) */}
+                    <div className="flex-1">
+                        <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">
+                            Total
+                        </label>
+                        <div className={`w-full rounded-xl border-2 px-3 py-3 text-xl font-black text-center transition-all ${
+                            isValid
+                                ? "border-teal-300 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-400"
+                                : "border-red-300 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400"
+                        }`}>
+                            {item.total_volume}
+                        </div>
                     </div>
                 </div>
             </div>
-
-            {/* Visual bar */}
-            {isValid && item.total_volume > 0 && (
-                <div className="mt-3">
-                    <div className="h-2 w-full rounded-full overflow-hidden flex">
-                        <div
-                            className="h-full bg-primary-500 transition-all duration-300"
-                            style={{ width: `${(item.oil_quantity / item.total_volume) * 100}%` }}
-                        />
-                        <div className="h-full bg-blue-400 flex-1" />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                        <span>Bibit {((item.oil_quantity / item.total_volume) * 100).toFixed(0)}%</span>
-                        <span>Alkohol {((item.alcohol_quantity / item.total_volume) * 100).toFixed(0)}%</span>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }
 
 // ---------------------------------------------------------------------------
-// Form Component (dipakai di Create & Edit)
+// IntensityForm (shared Create & Edit)
 // ---------------------------------------------------------------------------
-export function IntensityForm({ mode = "create", intensity = null, sizes = [], sizeQuantities = [], routeName, redirectRoute }) {
-    const [ratioError, setRatioError] = useState("");
+export function IntensityForm({ mode = "create", intensity = null, sizes = [], sizeQuantities = [], routeName }) {
+    const initRatio = getRatioFromString(intensity?.oil_ratio ?? "1 : 2");
+    const [oilNum, setOilNum] = useState(initRatio.oilNum);
+    const [alcNum, setAlcNum] = useState(initRatio.alcNum);
 
-    // Inisialisasi size_quantities dari prop atau default kosong
     const initSizeQty = sizes.map(size => {
         const existing = sizeQuantities.find(q => q.size_id === size.id);
         return existing ?? {
@@ -197,30 +193,25 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
         };
     });
 
-    const defaultOil = intensity?.oil_ratio ?? 33.3;
-
     const { data, setData, post, processing, errors, reset } = useForm({
         ...(mode === "edit" ? { _method: "PUT" } : {}),
-        code:                     intensity?.code ?? "",
-        name:                     intensity?.name ?? "",
-        oil_ratio:                defaultOil,
-        alcohol_ratio:            intensity?.alcohol_ratio ?? 66.7,
-        concentration_percentage: intensity?.concentration_percentage ?? defaultOil,
-        sort_order:               intensity?.sort_order ?? 0,
-        is_active:                intensity?.is_active ?? true,
-        size_quantities:          initSizeQty,
+        code:            intensity?.code          ?? "",
+        name:            intensity?.name          ?? "",
+        oil_ratio:       intensity?.oil_ratio     ?? "1 : 2",
+        alcohol_ratio:   intensity?.alcohol_ratio ?? "2 : 1",
+        sort_order:      intensity?.sort_order    ?? 0,
+        is_active:       intensity?.is_active     ?? true,
+        size_quantities: initSizeQty,
     });
 
-    const updateOil = useCallback((oilValue) => {
-        const oil   = Math.min(99, Math.max(1, parseFloat(oilValue) || 0));
-        const alkoh = parseFloat((100 - oil).toFixed(4));
+    const handleRatioChange = useCallback((newOil, newAlc) => {
+        setOilNum(newOil);
+        setAlcNum(newAlc);
         setData(prev => ({
             ...prev,
-            oil_ratio:                oil,
-            alcohol_ratio:            alkoh,
-            concentration_percentage: oil,
+            oil_ratio:     buildRatioString(newOil, newAlc),
+            alcohol_ratio: buildRatioString(newAlc, newOil),
         }));
-        setRatioError("");
     }, []);
 
     const updateSizeQty = (sizeId, updated) => {
@@ -229,13 +220,12 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
         ));
     };
 
-    // Auto-fill semua size berdasarkan ratio saat ini
     const handleAutoFillAll = () => {
         setData("size_quantities", data.size_quantities.map(q => {
-            const { oil, alcohol } = calcDefaultQty(data.oil_ratio, q.total_volume);
+            const { oil, alcohol } = calcDefaultQty(oilNum, alcNum, q.total_volume);
             return { ...q, oil_quantity: oil, alcohol_quantity: alcohol };
         }));
-        toast.success("Semua ukuran telah diisi otomatis berdasarkan ratio");
+        toast.success("Semua ukuran diisi otomatis berdasarkan ratio");
     };
 
     const allValid = data.size_quantities.every(q =>
@@ -244,27 +234,23 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
 
     const submit = (e) => {
         e.preventDefault();
-        const total = data.oil_ratio + data.alcohol_ratio;
-        if (Math.abs(total - 100) > 0.1) {
-            setRatioError(`Total ratio harus 100% (saat ini: ${total.toFixed(2)}%)`);
-            toast.error("Periksa ratio bibit dan alkohol");
-            return;
-        }
         if (!allValid) {
             toast.error("Periksa konfigurasi volume per ukuran botol");
             return;
         }
-
         post(route(routeName, intensity?.id), {
             onSuccess: () => {
-                toast.success(mode === "create" ? "Level Intensitas berhasil ditambahkan! 🔥" : "Intensitas berhasil diperbarui! 🚀");
+                toast.success(mode === "create"
+                    ? "Level Intensitas berhasil ditambahkan! 🔥"
+                    : "Intensitas berhasil diperbarui! 🚀"
+                );
                 if (mode === "create") reset();
             },
             onError: () => toast.error("Terjadi kesalahan, periksa form Anda"),
         });
     };
 
-    const info = getConcentrationInfo(data.oil_ratio);
+    const presetLabel = getPresetLabel(oilNum, alcNum);
 
     return (
         <form onSubmit={submit} className="space-y-6">
@@ -272,100 +258,119 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
 
                 {/* ── Sidebar: Ratio Panel ── */}
                 <div className="lg:col-span-1">
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sticky top-6 shadow-sm">
-                        <label className="block text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">
-                            Ratio Bibit : Alkohol <span className="text-red-500">*</span>
-                        </label>
-
-                        {/* Current ratio display */}
-                        <div className="mb-5 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-center">
-                            <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${info.color}`}>
-                                {info.label}
-                            </div>
-                            <div className="text-3xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">
-                                {getRatioString(data.oil_ratio)}
-                            </div>
-                            <div className="text-xs text-slate-400 mt-1">bibit : alkohol</div>
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm sticky top-6">
+                        {/* Teal header — sama dengan sidebar */}
+                        <div className="bg-teal-600 px-5 py-4">
+                            <p className="text-[10px] font-extrabold text-teal-200 uppercase tracking-widest mb-0.5">Konfigurasi</p>
+                            <p className="text-base font-bold text-white">Ratio Bibit : Alkohol</p>
                         </div>
 
-                        {/* Preset Buttons */}
-                        <div className="grid grid-cols-2 gap-2 mb-5">
-                            {CONCENTRATION_PRESETS.map((preset) => (
-                                <button
-                                    key={preset.label}
-                                    type="button"
-                                    onClick={() => updateOil(preset.oil)}
-                                    className={`py-2 px-3 rounded-xl text-xs font-bold border-2 transition-all ${
-                                        info.label === preset.label
-                                            ? "border-primary-500 bg-primary-50 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300"
-                                            : "border-slate-200 dark:border-slate-700 hover:border-primary-300 text-slate-600 dark:text-slate-400"
-                                    }`}
-                                >
-                                    <div>{preset.label}</div>
-                                    <div className="text-[10px] font-medium opacity-70 mt-0.5">{preset.ratio}</div>
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Slider */}
-                        <div className="mb-2">
-                            <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-                                <span>Bibit: <strong className="text-primary-600">{data.oil_ratio}%</strong></span>
-                                <span>Alkohol: <strong className="text-blue-600">{parseFloat(data.alcohol_ratio.toFixed(1))}%</strong></span>
-                            </div>
-                            <input
-                                type="range" min="1" max="99" step="0.1"
-                                value={data.oil_ratio}
-                                onChange={e => updateOil(parseFloat(e.target.value))}
-                                className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full appearance-none cursor-pointer accent-primary-600"
-                            />
-                            <div className="h-3 w-full rounded-full overflow-hidden mt-2 flex">
-                                <div className="h-full bg-primary-500 transition-all duration-200" style={{ width: `${data.oil_ratio}%` }} />
-                                <div className="h-full bg-blue-400 flex-1" />
-                            </div>
-                        </div>
-
-                        {/* Ratio Box */}
-                        <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <IconFlask size={14} className="text-primary-600" />
-                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Bibit Parfum</span>
+                        <div className="p-5 space-y-5">
+                            {/* Big ratio display */}
+                            <div className="text-center py-5 px-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                                {presetLabel ? (
+                                    <div className="inline-flex items-center px-3 py-1 rounded-full bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 text-[11px] font-extrabold uppercase tracking-widest mb-3">
+                                        {presetLabel}
+                                    </div>
+                                ) : (
+                                    <div className="inline-flex items-center px-3 py-1 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 text-[11px] font-extrabold uppercase tracking-widest mb-3">
+                                        Custom
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-center gap-4">
+                                    <span className="text-5xl font-black text-teal-600 dark:text-teal-400 font-mono tabular-nums leading-none">
+                                        {oilNum}
+                                    </span>
+                                    <span className="text-3xl font-black text-slate-300 dark:text-slate-600">:</span>
+                                    <span className="text-5xl font-black text-blue-500 dark:text-blue-400 font-mono tabular-nums leading-none">
+                                        {alcNum}
+                                    </span>
                                 </div>
-                                <span className="text-sm font-bold text-primary-600">{data.oil_ratio}%</span>
+                                <p className="text-xs text-slate-400 mt-3 font-medium tracking-wide">bibit : alkohol</p>
                             </div>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <IconBottle size={14} className="text-blue-600" />
-                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Alkohol</span>
-                                </div>
-                                <span className="text-sm font-bold text-blue-600">{parseFloat(data.alcohol_ratio.toFixed(1))}%</span>
-                            </div>
-                        </div>
 
-                        {(ratioError || errors.oil_ratio) && (
-                            <div className="mt-3 flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                                <IconAlertCircle size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
-                                <p className="text-xs font-medium text-red-600 dark:text-red-400">
-                                    {ratioError || errors.oil_ratio}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Status Toggle */}
-                        <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-800">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-200 block">Status Aktif</span>
-                                    <span className="text-xs text-slate-500 dark:text-slate-400">Intensitas bisa digunakan</span>
+                            {/* Input angka langsung */}
+                            <div>
+                                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-3">Input Ratio</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-[11px] font-bold text-teal-600 dark:text-teal-400 mb-1.5 uppercase tracking-widest">
+                                            Bibit
+                                        </label>
+                                        <input
+                                            type="number" min="1" max="99"
+                                            value={oilNum}
+                                            onChange={e => handleRatioChange(Math.max(1, parseInt(e.target.value) || 1), alcNum)}
+                                            className="w-full rounded-xl border-2 border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-3xl font-black text-center px-2 py-3 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-bold text-blue-500 dark:text-blue-400 mb-1.5 uppercase tracking-widest">
+                                            Alkohol
+                                        </label>
+                                        <input
+                                            type="number" min="1" max="99"
+                                            value={alcNum}
+                                            onChange={e => handleRatioChange(oilNum, Math.max(1, parseInt(e.target.value) || 1))}
+                                            className="w-full rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-3xl font-black text-center px-2 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                                        />
+                                    </div>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" checked={data.is_active}
-                                        onChange={e => setData("is_active", e.target.checked)}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600" />
-                                </label>
+                            </div>
+
+                            {/* Preset chips */}
+                            <div>
+                                <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-2.5">Preset Cepat</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {CONCENTRATION_PRESETS.map((preset) => {
+                                        const active = oilNum === preset.oilNum && alcNum === preset.alcNum;
+                                        return (
+                                            <button
+                                                key={preset.label}
+                                                type="button"
+                                                onClick={() => handleRatioChange(preset.oilNum, preset.alcNum)}
+                                                className={`py-2.5 px-3 rounded-xl text-xs font-bold border-2 transition-all flex flex-col items-center gap-0.5 ${
+                                                    active
+                                                        ? "border-teal-500 bg-teal-600 text-white shadow-md shadow-teal-500/20"
+                                                        : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20"
+                                                }`}
+                                            >
+                                                <span>{preset.label}</span>
+                                                <span className={`font-mono text-[10px] ${active ? "text-teal-100" : "text-slate-400"}`}>
+                                                    {preset.oilNum}:{preset.alcNum}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {(errors?.oil_ratio || errors?.alcohol_ratio) && (
+                                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                                    <IconAlertCircle size={15} className="text-red-600 flex-shrink-0 mt-0.5" />
+                                    <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                                        {errors.oil_ratio || errors.alcohol_ratio}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Status Toggle */}
+                            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200 block">Status Aktif</span>
+                                        <span className="text-xs text-slate-400">Intensitas bisa digunakan</span>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={data.is_active}
+                                            onChange={e => setData("is_active", e.target.checked)}
+                                            className="sr-only peer"
+                                        />
+                                        <div className="w-11 h-6 bg-slate-200 peer-focus:ring-4 peer-focus:ring-teal-300 dark:peer-focus:ring-teal-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-600" />
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -375,51 +380,34 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
                 <div className="lg:col-span-2 space-y-6">
 
                     {/* Informasi Intensitas */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-5 flex items-center gap-2">
-                            <div className="w-1 h-5 bg-primary-600 rounded-full" />
-                            Informasi Intensitas
-                        </h2>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <Input label="Kode Intensitas"
-                                value={data.code}
-                                onChange={e => setData("code", e.target.value.toUpperCase())}
-                                errors={errors.code}
-                                placeholder="EDT"
-                                required
-                                helperText="Contoh: EDT, EDP, EXT"
-                            />
-                            <Input label="Nama Intensitas"
-                                value={data.name}
-                                onChange={e => setData("name", e.target.value)}
-                                errors={errors.name}
-                                placeholder="Eau De Toilette"
-                                required
-                            />
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
+                            <div className="w-1 h-5 bg-teal-600 rounded-full" />
+                            <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">Informasi Intensitas</h2>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
-                            <Input type="number" label="Ratio Bibit (%)"
-                                value={data.oil_ratio}
-                                onChange={e => updateOil(e.target.value)}
-                                errors={errors.oil_ratio}
-                                placeholder="33.3"
-                                required step="0.1" min="1" max="99"
-                                helperText="Persentase bibit parfum (1–99%)"
-                            />
-                            <Input type="number" label="Ratio Alkohol (%)"
-                                value={parseFloat(data.alcohol_ratio.toFixed(1))}
-                                onChange={e => updateOil(100 - parseFloat(e.target.value || 0))}
-                                errors={errors.alcohol_ratio}
-                                placeholder="66.7"
-                                required step="0.1" min="1" max="99"
-                                helperText="Dihitung otomatis (100 − bibit)"
-                            />
-                        </div>
-
-                        <div className="mt-5">
-                            <Input type="number" label="Urutan Tampilan"
+                        <div className="p-6 space-y-5">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                <Input
+                                    label="Kode Intensitas"
+                                    value={data.code}
+                                    onChange={e => setData("code", e.target.value.toUpperCase())}
+                                    errors={errors.code}
+                                    placeholder="EDT"
+                                    required
+                                    helperText="Contoh: EDT, EDP, EXT"
+                                />
+                                <Input
+                                    label="Nama Intensitas"
+                                    value={data.name}
+                                    onChange={e => setData("name", e.target.value)}
+                                    errors={errors.name}
+                                    placeholder="Eau De Toilette"
+                                    required
+                                />
+                            </div>
+                            <Input
+                                type="number"
+                                label="Urutan Tampilan"
                                 value={data.sort_order}
                                 onChange={e => setData("sort_order", parseInt(e.target.value) || 0)}
                                 errors={errors.sort_order}
@@ -432,67 +420,74 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
 
                     {/* Volume per Ukuran Botol */}
                     {sizes.length > 0 && (
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                            <div className="flex items-center justify-between mb-2">
-                                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                                    <div className="w-1 h-5 bg-purple-600 rounded-full" />
-                                    Volume per Ukuran Botol
-                                </h2>
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-1 h-5 bg-teal-600 rounded-full" />
+                                    <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">Volume per Ukuran Botol</h2>
+                                </div>
                                 <button
                                     type="button"
                                     onClick={handleAutoFillAll}
-                                    className="text-sm px-4 py-2 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-all flex items-center gap-2"
+                                    className="text-xs px-4 py-2 rounded-xl bg-teal-600 text-white font-bold hover:bg-teal-700 transition-all flex items-center gap-2 shadow-sm"
                                 >
-                                    <IconFlask size={16} /> Auto-fill Semua
+                                    <IconFlask size={13} /> Auto-fill Semua
                                 </button>
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-5">
-                                Tentukan volume bibit & alkohol (integer/ml) untuk setiap ukuran botol.
-                                Jumlah harus tepat sama dengan total volume botol.
-                            </p>
 
-                            {/* Status summary */}
-                            <div className={`mb-4 p-3 rounded-xl border flex items-center gap-2 text-sm font-semibold ${allValid ? "border-green-200 bg-green-50 dark:bg-green-900/10 text-green-700 dark:text-green-400" : "border-amber-200 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400"}`}>
-                                {allValid
-                                    ? <><IconCheck size={16} strokeWidth={2.5} /> Semua ukuran sudah dikonfigurasi dengan benar</>
-                                    : <><IconAlertTriangle size={16} /> Beberapa ukuran belum sesuai — oil + alcohol harus = total volume</>
-                                }
-                            </div>
+                            <div className="p-6">
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                                    Masukkan jumlah ml bibit dan alkohol untuk setiap ukuran botol.
+                                    Total keduanya harus sama dengan volume botol.
+                                </p>
 
-                            <div className="space-y-4">
-                                {data.size_quantities.map(item => (
-                                    <SizeQuantityRow
-                                        key={item.size_id}
-                                        item={item}
-                                        oilRatio={data.oil_ratio}
-                                        onChange={(updated) => updateSizeQty(item.size_id, updated)}
-                                        errors={errors}
-                                    />
-                                ))}
-                            </div>
+                                <div className={`mb-5 p-3 rounded-xl border-2 flex items-center gap-2 text-sm font-bold ${
+                                    allValid
+                                        ? "border-teal-200 bg-teal-50 dark:bg-teal-900/10 text-teal-700 dark:text-teal-400"
+                                        : "border-amber-200 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400"
+                                }`}>
+                                    {allValid
+                                        ? <><IconCheck size={16} strokeWidth={2.5} /> Semua ukuran sudah dikonfigurasi dengan benar</>
+                                        : <><IconAlertTriangle size={16} /> Beberapa ukuran belum sesuai — bibit + alkohol harus = total volume</>
+                                    }
+                                </div>
 
-                            {/* Referensi standar */}
-                            <div className="mt-5 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
-                                <div className="flex gap-3">
-                                    <IconDropletFilled size={18} className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                                    <div>
-                                        <p className="text-xs font-bold text-blue-900 dark:text-blue-100 mb-2">
-                                            Referensi Standar (oil ml : alcohol ml)
-                                        </p>
-                                        <div className="grid grid-cols-3 gap-x-6 gap-y-1 text-xs text-blue-700 dark:text-blue-300">
-                                            <div className="font-bold text-blue-500 col-span-3 grid grid-cols-4 mb-1">
-                                                <span>Tipe</span><span className="text-center">30ml</span><span className="text-center">50ml</span><span className="text-center">100ml</span>
+                                <div className="space-y-4">
+                                    {data.size_quantities.map(item => (
+                                        <SizeQuantityRow
+                                            key={item.size_id}
+                                            item={item}
+                                            oilNum={oilNum}
+                                            alcNum={alcNum}
+                                            onChange={(updated) => updateSizeQty(item.size_id, updated)}
+                                        />
+                                    ))}
+                                </div>
+
+                                {/* Referensi */}
+                                <div className="mt-5 p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-xl">
+                                    <div className="flex gap-3">
+                                        <IconDropletFilled size={16} className="text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" />
+                                        <div className="flex-1">
+                                            <p className="text-xs font-bold text-teal-800 dark:text-teal-200 mb-2.5">Referensi Standar</p>
+                                            <div className="grid grid-cols-4 gap-2 text-xs">
+                                                <span className="font-bold text-teal-600 dark:text-teal-400">Tipe</span>
+                                                <span className="text-center font-bold text-teal-600 dark:text-teal-400">30ml</span>
+                                                <span className="text-center font-bold text-teal-600 dark:text-teal-400">50ml</span>
+                                                <span className="text-center font-bold text-teal-600 dark:text-teal-400">100ml</span>
+                                                {[
+                                                    { label: "EDT (1:2)", vals: ["10+20", "17+33", "33+67"] },
+                                                    { label: "EDP (1:1)", vals: ["15+15", "25+25", "50+50"] },
+                                                    { label: "EXT (2:1)", vals: ["20+10", "33+17", "67+33"] },
+                                                ].map(row => (
+                                                    <React.Fragment key={row.label}>
+                                                        <span className="font-semibold text-teal-700 dark:text-teal-300 border-t border-teal-100 dark:border-teal-800 pt-1.5">{row.label}</span>
+                                                        {row.vals.map((v, i) => (
+                                                            <span key={i} className="text-center font-mono text-teal-600 dark:text-teal-400 border-t border-teal-100 dark:border-teal-800 pt-1.5">{v}</span>
+                                                        ))}
+                                                    </React.Fragment>
+                                                ))}
                                             </div>
-                                            {[
-                                                { label: "EDT (1:2)", vals: ["10+20", "15+35", "35+65"] },
-                                                { label: "EDP (1:1)", vals: ["15+15", "25+25", "50+50"] },
-                                                { label: "EXT (2:1)", vals: ["20+10", "35+15", "65+35"] },
-                                            ].map(row => (
-                                                <div key={row.label} className="col-span-3 grid grid-cols-4 py-0.5 border-t border-blue-100 dark:border-blue-800">
-                                                    <span className="font-semibold">{row.label}</span>
-                                                    {row.vals.map((v, i) => <span key={i} className="text-center font-mono">{v}</span>)}
-                                                </div>
-                                            ))}
                                         </div>
                                     </div>
                                 </div>
@@ -502,17 +497,18 @@ export function IntensityForm({ mode = "create", intensity = null, sizes = [], s
 
                     {/* Actions */}
                     <div className="flex flex-col sm:flex-row justify-end gap-3">
-                        <Link href={route("intensities.index")}
-                            className="px-6 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-center"
+                        <Link
+                            href={route("intensities.index")}
+                            className="px-6 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all text-center text-sm"
                         >
                             Batal
                         </Link>
                         <button
                             type="submit"
-                            disabled={processing || !!ratioError || !allValid}
-                            className="px-6 py-2.5 rounded-xl bg-primary-600 text-white font-semibold hover:bg-primary-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary-500/30"
+                            disabled={processing || !allValid}
+                            className="px-6 py-2.5 rounded-xl bg-teal-600 text-white font-bold hover:bg-teal-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-teal-500/30 text-sm"
                         >
-                            <IconDeviceFloppy size={20} strokeWidth={2} />
+                            <IconDeviceFloppy size={18} strokeWidth={2} />
                             <span>
                                 {processing
                                     ? "Menyimpan..."
@@ -536,13 +532,14 @@ export default function Create({ sizes }) {
             <Head title="Tambah Intensitas" />
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <div className="mb-6">
-                    <Link href={route("intensities.index")}
-                        className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors mb-4"
+                    <Link
+                        href={route("intensities.index")}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400 transition-colors mb-4"
                     >
-                        <IconArrowLeft size={18} strokeWidth={2} />
+                        <IconArrowLeft size={16} strokeWidth={2} />
                         Kembali ke daftar intensitas
                     </Link>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Tambah Level Intensitas Baru</h1>
+                    <h1 className="text-2xl font-black text-slate-900 dark:text-white">Tambah Level Intensitas</h1>
                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                         Tentukan kekuatan aroma dan volume bibit/alkohol per ukuran botol
                     </p>

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Apps;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Ingredient\StoreIngredientRequest;
+use App\Http\Requests\Ingredient\UpdateIngredientRequest;
 use App\Models\Ingredient;
 use App\Models\IngredientCategory;
 use Illuminate\Http\Request;
@@ -23,7 +25,23 @@ class IngredientController extends Controller
             ->orderBy('sort_order')
             ->orderBy('name')
             ->paginate(15)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn($item) => [
+                'id'                     => $item->id,
+                'code'                   => $item->code,
+                'name'                   => $item->name,
+                'unit'                   => $item->unit,
+                'description'            => $item->description,
+                'image_url'              => $item->image_url,
+                'average_cost'           => $item->average_cost,
+                'is_active'              => $item->is_active,
+                'sort_order'             => $item->sort_order,
+                'category'               => $item->category ? [
+                    'id'              => $item->category->id,
+                    'name'            => $item->category->name,
+                    'ingredient_type' => $item->category->ingredient_type,
+                ] : null,
+            ]);
 
         $categories = IngredientCategory::orderBy('sort_order')
             ->orderBy('name')
@@ -46,24 +64,14 @@ class IngredientController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreIngredientRequest $request)
     {
-        $data = $request->validate([
-            'ingredient_category_id' => 'required|exists:ingredient_categories,id',
-            'code'                   => 'required|string|max:100|unique:ingredients,code',
-            'name'                   => 'required|string|max:255',
-            'unit'                   => ['required', 'string', Rule::in(['ml', 'gr', 'kg', 'liter', 'pcs'])],
-            'sort_order'             => 'nullable|integer|min:0',
-            'description'            => 'nullable|string|max:1000',
-            'image'                  => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'is_active'              => 'boolean',
-        ]);
+        $data = $request->validated();
 
         if ($request->hasFile('image')) {
             $data['image'] = $request->file('image')->store('ingredients', 'public');
         }
 
-        // average_cost selalu mulai 0 — diperbarui via WAC saat PO diterima
         $data['average_cost'] = 0;
         $data['sort_order']   = $data['sort_order'] ?? 0;
 
@@ -76,35 +84,40 @@ class IngredientController extends Controller
     public function edit(Ingredient $ingredient)
     {
         return Inertia::render('Dashboard/Ingredients/Edit', [
-            'ingredient' => $ingredient,
+            'ingredient' => [
+                'id'                     => $ingredient->id,
+                'code'                   => $ingredient->code,
+                'name'                   => $ingredient->name,
+                'unit'                   => $ingredient->unit,
+                'description'            => $ingredient->description,
+                'image_url'              => $ingredient->image_url,
+                'average_cost'           => $ingredient->average_cost,
+                'is_active'              => $ingredient->is_active,
+                'sort_order'             => $ingredient->sort_order,
+                'ingredient_category_id' => $ingredient->ingredient_category_id,
+            ],
             'categories' => IngredientCategory::orderBy('sort_order')
                 ->orderBy('name')
                 ->get(['id', 'code', 'name', 'ingredient_type']),
         ]);
     }
 
-    public function update(Request $request, Ingredient $ingredient)
+    public function update(UpdateIngredientRequest $request, Ingredient $ingredient)
     {
-        $data = $request->validate([
-            'ingredient_category_id' => 'required|exists:ingredient_categories,id',
-            'code'                   => ['required', 'string', 'max:100', Rule::unique('ingredients')->ignore($ingredient->id)],
-            'name'                   => 'required|string|max:255',
-            'unit'                   => ['required', 'string', Rule::in(['ml', 'gr', 'kg', 'liter', 'pcs'])],
-            'sort_order'             => 'nullable|integer|min:0',
-            'description'            => 'nullable|string|max:1000',
-            'image'                  => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
-            'is_active'              => 'boolean',
-            // average_cost tidak boleh diubah dari form — hanya via WAC
-        ]);
+        $data = $request->validated();
 
         if ($request->hasFile('image')) {
+            // Hapus foto lama sebelum simpan baru
             if ($ingredient->image) {
                 Storage::disk('public')->delete($ingredient->image);
             }
             $data['image'] = $request->file('image')->store('ingredients', 'public');
+        } else {
+            // Tidak ada file baru → buang key 'image' agar foto lama tidak ter-overwrite
+            unset($data['image']);
         }
 
-        $data['sort_order'] = $data['sort_order'] ?? 0;
+        $data['sort_order'] = $data['sort_order'] ?? $ingredient->sort_order;
 
         $ingredient->update($data);
 
@@ -114,7 +127,6 @@ class IngredientController extends Controller
 
     public function destroy(Ingredient $ingredient)
     {
-        // Cek apakah ingredient digunakan di recipe
         if ($ingredient->variantRecipes()->exists()) {
             return back()->with('error', 'Gagal: Bahan masih digunakan di formula variant.');
         }

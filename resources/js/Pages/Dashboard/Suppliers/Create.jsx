@@ -4,7 +4,7 @@ import { Head, useForm, Link } from "@inertiajs/react";
 import Input from "@/Components/Dashboard/Input";
 import {
     IconArrowLeft, IconDeviceFloppy, IconTruckDelivery, IconBarcode,
-    IconPhone, IconUser, IconMail, IconReceipt, IconCreditCard,
+    IconPhone, IconUser, IconMail, IconCreditCard,
     IconMapPin, IconAlertCircle, IconInfoCircle
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
@@ -19,7 +19,6 @@ export default function Create({ paymentTerms }) {
         phone: "",
         email: "",
         address: "",
-        tax_id: "",
         payment_term: "cash",
         credit_limit: 0,
         is_active: true,
@@ -43,7 +42,6 @@ export default function Create({ paymentTerms }) {
 
     const handleGenerateCode = () => {
         setIsGeneratingCode(true);
-        // Simulate code generation - in production, this could be an API call
         setTimeout(() => {
             const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
             setData('code', `SUP-${randomNum}`);
@@ -53,11 +51,10 @@ export default function Create({ paymentTerms }) {
     };
 
     const handlePaymentTermChange = (term) => {
-        setData(prevData => ({
-            ...prevData,
-            payment_term: term,
-            credit_limit: term === 'cash' ? 0 : prevData.credit_limit
-        }));
+        setData("payment_term", term);
+        if (term === "cash") {
+            setData("credit_limit", 0);
+        }
     };
 
     return (
@@ -67,14 +64,14 @@ export default function Create({ paymentTerms }) {
                 {/* Breadcrumb */}
                 <Link
                     href={route('suppliers.index')}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-indigo-600 mb-4 transition-colors"
+                    className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-teal-600 mb-4 transition-colors"
                 >
                     <IconArrowLeft size={18} strokeWidth={2} /> Kembali ke Daftar
                 </Link>
 
                 {/* Header */}
                 <div className="flex items-center gap-3 mb-6">
-                    <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg text-indigo-600">
+                    <div className="p-2 bg-teal-100 dark:bg-teal-900/30 rounded-lg text-teal-600">
                         <IconTruckDelivery size={28} />
                     </div>
                     <div>
@@ -89,7 +86,7 @@ export default function Create({ paymentTerms }) {
                         {/* Informasi Utama */}
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
                             <div className="flex items-center gap-2 mb-5 pb-3 border-b dark:border-slate-800">
-                                <IconInfoCircle size={20} className="text-indigo-500" />
+                                <IconInfoCircle size={20} className="text-teal-500" />
                                 <h2 className="text-lg font-semibold dark:text-white">Informasi Utama</h2>
                             </div>
 
@@ -108,11 +105,11 @@ export default function Create({ paymentTerms }) {
                                         type="button"
                                         onClick={handleGenerateCode}
                                         disabled={isGeneratingCode}
-                                        className="mt-2 text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 disabled:opacity-50"
+                                        className="mt-2 text-xs text-teal-600 hover:text-teal-700 font-medium flex items-center gap-1 disabled:opacity-50"
                                     >
                                         {isGeneratingCode ? (
                                             <>
-                                                <div className="animate-spin h-3 w-3 border-2 border-indigo-600 border-t-transparent rounded-full"></div>
+                                                <div className="animate-spin h-3 w-3 border-2 border-teal-600 border-t-transparent rounded-full"></div>
                                                 Generating...
                                             </>
                                         ) : (
@@ -161,14 +158,6 @@ export default function Create({ paymentTerms }) {
                                     placeholder="0812..."
                                     icon={<IconPhone size={18} />}
                                 />
-                                <Input
-                                    label="NPWP (Tax ID)"
-                                    value={data.tax_id}
-                                    onChange={e => setData('tax_id', e.target.value)}
-                                    errors={errors.tax_id}
-                                    placeholder="00.000.000.0-000.000"
-                                    icon={<IconReceipt size={18} />}
-                                />
                             </div>
 
                             <div className="mb-5">
@@ -180,7 +169,7 @@ export default function Create({ paymentTerms }) {
                                     rows="3"
                                     value={data.address}
                                     onChange={e => setData('address', e.target.value)}
-                                    className={`w-full px-4 py-2.5 rounded-xl border bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all resize-none ${
+                                    className={`w-full px-4 py-2.5 rounded-xl border bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all resize-none ${
                                         errors.address ? 'border-red-500 focus:ring-red-500' : 'border-slate-300 dark:border-slate-700'
                                     }`}
                                     placeholder="Alamat lengkap supplier termasuk kota dan kode pos..."
@@ -197,7 +186,7 @@ export default function Create({ paymentTerms }) {
                         {/* Syarat Pembayaran */}
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
                             <div className="flex items-center gap-2 mb-5 pb-3 border-b dark:border-slate-800">
-                                <IconCreditCard size={20} className="text-indigo-500" />
+                                <IconCreditCard size={20} className="text-teal-500" />
                                 <h2 className="text-lg font-semibold dark:text-white">Syarat Pembayaran</h2>
                             </div>
 
@@ -209,7 +198,7 @@ export default function Create({ paymentTerms }) {
                                     <select
                                         value={data.payment_term}
                                         onChange={e => handlePaymentTermChange(e.target.value)}
-                                        className={`w-full px-4 py-2.5 rounded-xl border bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all ${
+                                        className={`w-full px-4 py-2.5 rounded-xl border bg-white dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all ${
                                             errors.payment_term ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'
                                         }`}
                                     >
@@ -241,8 +230,8 @@ export default function Create({ paymentTerms }) {
                             </div>
 
                             {data.payment_term !== 'cash' && data.credit_limit > 0 && (
-                                <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                                <div className="mt-4 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg">
+                                    <p className="text-xs text-teal-700 dark:text-teal-300">
                                         💡 <strong>Info:</strong> Supplier akan mendapat limit kredit sebesar Rp {Number(data.credit_limit).toLocaleString('id-ID')}
                                     </p>
                                 </div>
@@ -260,7 +249,7 @@ export default function Create({ paymentTerms }) {
                             <button
                                 type="submit"
                                 disabled={processing}
-                                className="px-6 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="px-6 py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-teal-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {processing ? (
                                     <>
@@ -300,32 +289,28 @@ export default function Create({ paymentTerms }) {
                                         onChange={e => setData('is_active', e.target.checked)}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-100 dark:peer-focus:ring-indigo-900 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-teal-100 dark:peer-focus:ring-teal-900 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-teal-500"></div>
                                 </label>
                             </div>
                         </div>
 
                         {/* Help Card */}
-                        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 border border-indigo-100 dark:border-indigo-800 rounded-2xl p-5">
-                            <h4 className="text-sm font-bold text-indigo-900 dark:text-indigo-200 mb-3 flex items-center gap-2">
+                        <div className="bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 border border-teal-100 dark:border-teal-800 rounded-2xl p-5">
+                            <h4 className="text-sm font-bold text-teal-900 dark:text-teal-200 mb-3 flex items-center gap-2">
                                 <IconInfoCircle size={18} />
                                 Panduan Pengisian
                             </h4>
-                            <ul className="text-xs text-indigo-700 dark:text-indigo-300 space-y-2">
+                            <ul className="text-xs text-teal-700 dark:text-teal-300 space-y-2">
                                 <li className="flex items-start gap-2">
-                                    <span className="text-indigo-500 mt-0.5">•</span>
+                                    <span className="text-teal-500 mt-0.5">•</span>
                                     <span><strong>Kode:</strong> Harus unik, gunakan format SUP-XXX</span>
                                 </li>
                                 <li className="flex items-start gap-2">
-                                    <span className="text-indigo-500 mt-0.5">•</span>
+                                    <span className="text-teal-500 mt-0.5">•</span>
                                     <span><strong>Email:</strong> Pastikan valid untuk komunikasi</span>
                                 </li>
                                 <li className="flex items-start gap-2">
-                                    <span className="text-indigo-500 mt-0.5">•</span>
-                                    <span><strong>NPWP:</strong> Format 00.000.000.0-000.000</span>
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="text-indigo-500 mt-0.5">•</span>
+                                    <span className="text-teal-500 mt-0.5">•</span>
                                     <span><strong>Kredit:</strong> Limit hanya berlaku jika bukan cash</span>
                                 </li>
                             </ul>

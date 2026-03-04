@@ -2,19 +2,18 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Supplier extends Model
 {
     use HasFactory, HasUuids, SoftDeletes;
 
-    /**
-     * The attributes that are mass assignable.
-     */
+    protected $keyType = 'string';
+    public $incrementing = false;
+
     protected $fillable = [
         'code',
         'name',
@@ -22,156 +21,62 @@ class Supplier extends Model
         'phone',
         'email',
         'address',
-        'tax_id',
         'payment_term',
         'credit_limit',
-        'is_active'
+        'is_active',
     ];
 
-    /**
-     * The attributes that should be cast.
-     */
     protected $casts = [
-        'is_active' => 'boolean',
         'credit_limit' => 'decimal:2',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
-        'deleted_at' => 'datetime',
+        'is_active'    => 'boolean',
+        'deleted_at'   => 'datetime',
     ];
 
-    /**
-     * The attributes that should be hidden for arrays.
-     */
-    protected $hidden = [
-        'deleted_at',
+    // ─── Payment Term Labels ───────────────────────────────────────────────
+
+    public const PAYMENT_TERMS = [
+        'cash'      => 'Tunai (Cash)',
+        'credit_7'  => 'Kredit 7 Hari',
+        'credit_14' => 'Kredit 14 Hari',
+        'credit_30' => 'Kredit 30 Hari',
+        'credit_60' => 'Kredit 60 Hari',
     ];
 
-    /**
-     * The accessors to append to the model's array form.
-     */
-    protected $appends = [
-        'status_label',
-        'payment_term_label',
-    ];
-
-    /**
-     * Get the route key for the model.
-     */
-    public function getRouteKeyName(): string
+    public function getPaymentTermLabelAttribute(): string
     {
-        return 'id';
+        return self::PAYMENT_TERMS[$this->payment_term] ?? $this->payment_term;
     }
 
-    /**
-     * Boot the model.
-     */
-    protected static function boot(): void
+    public function getFormattedCreditLimitAttribute(): string
     {
-        parent::boot();
-
-        // Ensure code is always uppercase
-        static::creating(function ($supplier) {
-            $supplier->code = strtoupper($supplier->code);
-        });
-
-        static::updating(function ($supplier) {
-            $supplier->code = strtoupper($supplier->code);
-        });
+        return 'Rp ' . number_format($this->credit_limit, 2, ',', '.');
     }
 
-    /**
-     * Scope untuk pencarian data supplier
-     */
-    public function scopeSearch(Builder $query, ?string $term): Builder
-    {
-        if (empty($term)) {
-            return $query;
-        }
-
-        return $query->where(function (Builder $q) use ($term) {
-            $searchTerm = "%{$term}%";
-            $q->where('name', 'like', $searchTerm)
-              ->orWhere('code', 'like', $searchTerm)
-              ->orWhere('contact_person', 'like', $searchTerm)
-              ->orWhere('email', 'like', $searchTerm)
-              ->orWhere('phone', 'like', $searchTerm);
-        });
-    }
-
-    /**
-     * Scope untuk filter supplier aktif
-     */
-    public function scopeActive(Builder $query): Builder
-    {
-        return $query->where('is_active', true);
-    }
-
-    /**
-     * Scope untuk filter supplier tidak aktif
-     */
-    public function scopeInactive(Builder $query): Builder
-    {
-        return $query->where('is_active', false);
-    }
-
-    /**
-     * Scope untuk filter berdasarkan payment term
-     */
-    public function scopeByPaymentTerm(Builder $query, string $term): Builder
-    {
-        return $query->where('payment_term', $term);
-    }
-
-    /**
-     * Get status label attribute
-     */
     public function getStatusLabelAttribute(): string
     {
         return $this->is_active ? 'Aktif' : 'Nonaktif';
     }
 
-    /**
-     * Get payment term label attribute
-     */
-    public function getPaymentTermLabelAttribute(): string
+    // ─── Scopes ───────────────────────────────────────────────────────────
+
+    public function scopeSearch($query, string $keyword)
     {
-        return match($this->payment_term) {
-            'cash' => 'Tunai (Cash)',
-            'credit_7' => 'Kredit 7 Hari',
-            'credit_14' => 'Kredit 14 Hari',
-            'credit_30' => 'Kredit 30 Hari',
-            'credit_60' => 'Kredit 60 Hari',
-            default => ucfirst(str_replace('_', ' ', $this->payment_term)),
-        };
+        return $query->where(function ($q) use ($keyword) {
+            $q->where('name', 'like', "%{$keyword}%")
+              ->orWhere('code', 'like', "%{$keyword}%")
+              ->orWhere('email', 'like', "%{$keyword}%")
+              ->orWhere('contact_person', 'like', "%{$keyword}%")
+              ->orWhere('phone', 'like', "%{$keyword}%");
+        });
     }
 
-    /**
-     * Check if supplier has credit payment
-     */
-    public function hasCreditPayment(): bool
+    public function scopeByPaymentTerm($query, string $term)
     {
-        return $this->payment_term !== 'cash';
+        return $query->where('payment_term', $term);
     }
 
-    /**
-     * Get credit days
-     */
-    public function getCreditDays(): int
+    public function scopeActive($query)
     {
-        return match($this->payment_term) {
-            'credit_7' => 7,
-            'credit_14' => 14,
-            'credit_30' => 30,
-            'credit_60' => 60,
-            default => 0,
-        };
-    }
-
-    /**
-     * Format credit limit to readable format
-     */
-    public function getFormattedCreditLimitAttribute(): string
-    {
-        return 'Rp ' . number_format($this->credit_limit, 0, ',', '.');
+        return $query->where('is_active', true);
     }
 }

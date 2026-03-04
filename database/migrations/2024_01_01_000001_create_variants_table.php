@@ -41,13 +41,10 @@ return new class extends Migration
             $table->string('code', 20)->unique(); // EDT, EDP, EXT
             $table->string('name', 100);
 
-            $table->decimal('oil_ratio', 5, 2)
-                  ->comment('Ratio bibit parfum (1-20)');
-            $table->decimal('alcohol_ratio', 5, 2)
-                  ->comment('Ratio alkohol (80-99)');
-
-            $table->decimal('concentration_percentage', 5, 2)->nullable()
-                  ->comment('Persentase konsentrasi (5-30%)');
+            $table->string('oil_ratio', 10)
+                ->comment('Ratio bibit parfum, contoh: 2:1, 1:1');
+            $table->string('alcohol_ratio', 10)
+                ->comment('Ratio alkohol, contoh: 1:1, 1:2');
 
             $table->integer('sort_order')->default(0);
             $table->boolean('is_active')->default(true);
