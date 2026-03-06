@@ -12,10 +12,10 @@ use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: __DIR__ . '/../routes/web.php',
-        api: __DIR__ . '/../routes/api.php',         // ← tambahkan api routes
+        web:      __DIR__ . '/../routes/web.php',
+        api:      __DIR__ . '/../routes/api.php',
         commands: __DIR__ . '/../routes/console.php',
-        health: '/up',
+        health:   '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->web(append: [
@@ -24,9 +24,13 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->alias([
+            // Spatie Permission
             'role'               => RoleMiddleware::class,
             'permission'         => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
+
+            // POS: inject active_store ke request dari header X-Store-ID
+            'pos.store'          => \App\Http\Middleware\PosStoreMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

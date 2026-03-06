@@ -1,39 +1,38 @@
 import { usePage } from "@inertiajs/react";
 import {
+    IconAdjustments,
     IconBooks,
+    IconBoxPadding,
+    IconBuildingSkyscraper,
+    IconBuildingStore,
+    IconBuildingWarehouse,
+    IconCash,
+    IconCategory,
     IconChartArrowsVertical,
-    IconChartBarPopular,
     IconChartInfographic,
     IconCirclePlus,
     IconClockHour6,
     IconCreditCard,
+    IconFlask,
+    IconHistory,
     IconLayout2,
-    IconCash,
+    IconPackage,
+    IconPackages,
+    IconPerfume,
+    IconReportMoney,
+    IconReportAnalytics,
+    IconRuler2,
+    IconShoppingBag,
     IconShoppingCart,
     IconTable,
+    IconTag,
+    IconTicket,
+    IconTransfer,
     IconUserBolt,
     IconUserShield,
     IconUserSquare,
     IconUsers,
-    IconBuildingSkyscraper,
-    IconRuler2,
-    IconBuildingWarehouse,
-    IconBuildingStore,
     IconUsersPlus,
-    IconTicket,
-    IconFlask,
-    IconPackages,
-    IconBoxPadding,
-    IconTransfer,
-    IconHistory,
-    IconAdjustments,
-    IconShoppingBag,
-    IconPackage,
-    IconTag,
-    IconCategory,
-    IconPerfume,
-    IconReportMoney,
-    IconReportAnalytics,
 } from "@tabler/icons-react";
 import hasAnyPermission from "./Permission";
 import React from "react";
@@ -42,6 +41,7 @@ export default function Menu() {
     const { url } = usePage();
 
     const menuNavigation = [
+
         // ─── Overview ─────────────────────────────────────────────────────────
         {
             title: "Overview",

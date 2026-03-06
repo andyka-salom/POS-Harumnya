@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Head, router, usePage } from "@inertiajs/react";
 import axios from "axios";
 import toast from "react-hot-toast";
@@ -10,7 +10,7 @@ import {
     IconClock, IconCheck, IconAlertTriangle, IconTag,
     IconChevronDown, IconPercentage, IconCurrencyDollar,
     IconUserPlus, IconPhone, IconMail, IconGift,
-    IconBox,
+    IconBox, IconStar,
 } from "@tabler/icons-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -19,11 +19,16 @@ const fmt = (v = 0) =>
         style: "currency", currency: "IDR", minimumFractionDigits: 0,
     });
 
-const GENDER_ICON = { male: "👔", female: "👗", unisex: "⚡" };
-const TIER_COLOR  = {
+const GENDER_ICON  = { male: "👔", female: "👗", unisex: "⚡" };
+const TIER_COLOR   = {
     bronze: "text-amber-700", silver: "text-slate-500",
     gold: "text-yellow-500", platinum: "text-violet-500",
 };
+const INTENSITY_GRADIENTS = [
+    "from-violet-500 to-purple-600", "from-blue-500 to-indigo-600",
+    "from-emerald-500 to-teal-600",  "from-rose-500 to-pink-600",
+    "from-amber-500 to-orange-600",
+];
 
 // ─── Modal Shell ──────────────────────────────────────────────────────────────
 function Modal({ show, onClose, children, maxW = "max-w-lg" }) {
@@ -45,74 +50,119 @@ function Modal({ show, onClose, children, maxW = "max-w-lg" }) {
     );
 }
 
-// ─── Intensity Modal ──────────────────────────────────────────────────────────
-function IntensityModal({ show, onClose, variant, intensities, loading, onSelect }) {
-    const gradients = [
-        "from-violet-500 to-purple-600", "from-blue-500 to-indigo-600",
-        "from-emerald-500 to-teal-600",  "from-rose-500 to-pink-600",
-        "from-amber-500 to-orange-600",
-    ];
+// ─── STEP 1: Intensity Selection Grid (bukan modal, langsung di panel kiri) ──
+// Ditampilkan sebagai card besar yang bisa di-klik
+
+// ─── STEP 2: Variant Modal (setelah intensity dipilih) ───────────────────────
+function VariantModal({ show, onClose, intensity, variants, loading, onSelect, searchTerm, setSearchTerm, filterGender, setFilterGender }) {
+    const filtered = useMemo(() => {
+        let f = variants;
+        if (filterGender !== "all") f = f.filter(v => v.gender === filterGender);
+        if (searchTerm) f = f.filter(v =>
+            v.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (v.code ?? "").toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        return f;
+    }, [variants, filterGender, searchTerm]);
+
     return (
-        <Modal show={show} onClose={onClose} maxW="max-w-md">
+        <Modal show={show} onClose={onClose} maxW="max-w-2xl">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-shrink-0">
                 <div>
-                    <p className="text-xs text-slate-400 font-medium mb-0.5">Pilih konsentrasi untuk</p>
-                    <h3 className="font-bold text-slate-800 dark:text-white text-lg leading-tight">{variant?.name}</h3>
+                    <p className="text-xs text-slate-400 font-medium mb-0.5">Pilih varian untuk konsentrasi</p>
+                    <h3 className="font-bold text-slate-800 dark:text-white text-lg leading-tight flex items-center gap-2">
+                        <span className="px-2 py-0.5 bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 rounded-lg text-sm font-bold">
+                            {intensity?.code}
+                        </span>
+                        {intensity?.name}
+                    </h3>
                 </div>
                 <button onClick={onClose} className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center flex-shrink-0 transition-colors">
                     <IconX size={17} className="text-slate-500"/>
                 </button>
             </div>
-            <div className="overflow-y-auto p-4 space-y-2">
+
+            {/* Search + filter */}
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex-shrink-0 space-y-2">
+                <div className="relative">
+                    <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input type="text" placeholder="Cari varian..." value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        className="w-full h-9 pl-9 pr-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
+                </div>
+                <div className="flex gap-1.5">
+                    {[
+                        { value: "all",    label: "Semua", icon: "🌟" },
+                        { value: "male",   label: "Pria",  icon: "👔" },
+                        { value: "female", label: "Wanita", icon: "👗" },
+                        { value: "unisex", label: "Unisex", icon: "⚡" },
+                    ].map(g => (
+                        <button key={g.value} onClick={() => setFilterGender(g.value)}
+                            className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all ${
+                                filterGender === g.value
+                                    ? "bg-primary-500 text-white shadow-md shadow-primary-500/30"
+                                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+                            }`}>
+                            {g.icon} {g.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="overflow-y-auto p-4">
                 {loading ? (
                     <div className="py-10 flex items-center justify-center gap-2 text-slate-400">
                         <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"/>
-                        <span className="text-sm">Mengecek ketersediaan...</span>
+                        <span className="text-sm">Memuat varian...</span>
                     </div>
-                ) : intensities.length === 0 ? (
+                ) : filtered.length === 0 ? (
                     <div className="py-10 text-center">
                         <IconAlertTriangle size={32} className="mx-auto mb-2 text-amber-400"/>
-                        <p className="text-sm text-slate-500">Stok tidak tersedia untuk varian ini</p>
+                        <p className="text-sm text-slate-500">Varian tidak ditemukan</p>
                     </div>
-                ) : intensities.map((intensity, i) => {
-                    const oilPct = parseFloat(intensity.oil_ratio) || 0;
-                    const grad = gradients[i % gradients.length];
-                    return (
-                        <button key={intensity.id} onClick={() => { onSelect(intensity); onClose(); }}
-                            className="group w-full p-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800 hover:border-primary-400 dark:hover:border-primary-600 bg-white dark:bg-slate-800/50 hover:bg-primary-50/50 dark:hover:bg-primary-950/20 transition-all text-left flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center flex-shrink-0 shadow-lg`}>
-                                <IconFlask size={22} className="text-white"/>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="font-bold text-slate-800 dark:text-white">{intensity.name}</span>
-                                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold">{intensity.code}</span>
+                ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {filtered.map(variant => (
+                            <button key={variant.id}
+                                onClick={() => { onSelect(variant); onClose(); }}
+                                className="group flex flex-col rounded-2xl border-2 border-slate-100 dark:border-slate-800 hover:border-primary-400 dark:hover:border-primary-600 bg-white dark:bg-slate-800/50 hover:bg-primary-50/50 dark:hover:bg-primary-950/20 transition-all overflow-hidden text-left">
+                                <div className="aspect-square bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 relative overflow-hidden">
+                                    {variant.image ? (
+                                        <img src={`/storage/${variant.image}`} alt={variant.name}
+                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
+                                    ) : (
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <IconBottle size={36} className="text-slate-300 dark:text-slate-600"/>
+                                        </div>
+                                    )}
+                                    {variant.gender && (
+                                        <span className="absolute top-2 right-2 bg-white/90 dark:bg-slate-900/90 rounded-full w-7 h-7 flex items-center justify-center shadow text-sm">
+                                            {GENDER_ICON[variant.gender] ?? ""}
+                                        </span>
+                                    )}
                                 </div>
-                                <div className="flex items-center gap-3 mb-2">
-                                    <span className="text-xs text-slate-500">Oil <strong className="text-slate-700 dark:text-slate-200">{intensity.oil_ratio}%</strong></span>
-                                    <span className="text-xs text-slate-500">Alkohol <strong className="text-slate-700 dark:text-slate-200">{intensity.alcohol_ratio}%</strong></span>
+                                <div className="p-2.5">
+                                    <p className="font-bold text-slate-800 dark:text-white text-xs line-clamp-2 leading-tight">{variant.name}</p>
+                                    <p className="text-[10px] text-slate-400 mt-0.5">{variant.code}</p>
                                 </div>
-                                <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                    <div className={`h-full bg-gradient-to-r ${grad} rounded-full`} style={{ width: `${oilPct}%` }}/>
-                                </div>
-                            </div>
-                            <IconChevronRight size={18} className="text-slate-300 group-hover:text-primary-500 flex-shrink-0 transition-colors"/>
-                        </button>
-                    );
-                })}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
         </Modal>
     );
 }
 
-// ─── Size Modal ───────────────────────────────────────────────────────────────
+// ─── STEP 3: Size Modal ───────────────────────────────────────────────────────
 function SizeModal({ show, onClose, variant, intensity, sizes, loading, onSelect }) {
     return (
         <Modal show={show} onClose={onClose} maxW="max-w-sm">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-shrink-0">
                 <div>
                     <p className="text-xs text-slate-400 font-medium mb-0.5">
-                        {variant?.name} · <span className="text-primary-500 font-bold">{intensity?.code}</span>
+                        <span className="text-primary-500 font-bold">{intensity?.code}</span>
+                        {" · "}{variant?.name}
                     </p>
                     <h3 className="font-bold text-slate-800 dark:text-white text-lg">Pilih Ukuran</h3>
                 </div>
@@ -195,14 +245,6 @@ function AddCustomerModal({ show, onClose, onSaved }) {
         }
     };
 
-    const Field = ({ label, error, children }) => (
-        <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">{label}</label>
-            {children}
-            {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
-        </div>
-    );
-
     return (
         <Modal show={show} onClose={onClose} maxW="max-w-md">
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-shrink-0">
@@ -214,29 +256,25 @@ function AddCustomerModal({ show, onClose, onSaved }) {
                 </button>
             </div>
             <div className="overflow-y-auto p-5 space-y-4">
-                <Field label="Nama Lengkap *" error={errors.name}>
-                    <input type="text" value={form.name} onChange={e => set("name", e.target.value)}
-                        placeholder="Nama pelanggan"
-                        className={`w-full h-10 px-3 rounded-xl border text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 dark:bg-slate-900 dark:text-white ${errors.name ? "border-red-400" : "border-slate-200 dark:border-slate-700"}`}/>
-                </Field>
-                <Field label="No. HP *" error={errors.phone}>
-                    <div className="relative">
-                        <IconPhone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                        <input type="tel" value={form.phone} onChange={e => set("phone", e.target.value)}
-                            placeholder="08xx-xxxx-xxxx"
-                            className={`w-full h-10 pl-9 pr-3 rounded-xl border text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 dark:bg-slate-900 dark:text-white ${errors.phone ? "border-red-400" : "border-slate-200 dark:border-slate-700"}`}/>
+                {[
+                    { key: "name",  label: "Nama Lengkap *",  type: "text",  placeholder: "Nama pelanggan" },
+                    { key: "phone", label: "No. HP *",         type: "tel",   placeholder: "08xx-xxxx-xxxx", icon: <IconPhone size={14}/> },
+                    { key: "email", label: "Email",            type: "email", placeholder: "email@contoh.com", icon: <IconMail size={14}/> },
+                ].map(f => (
+                    <div key={f.key}>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">{f.label}</label>
+                        <div className="relative">
+                            {f.icon && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">{f.icon}</span>}
+                            <input type={f.type} value={form[f.key]} onChange={e => set(f.key, e.target.value)}
+                                placeholder={f.placeholder}
+                                className={`w-full h-10 ${f.icon ? "pl-9" : "px-3"} pr-3 rounded-xl border text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 dark:bg-slate-900 dark:text-white ${errors[f.key] ? "border-red-400" : "border-slate-200 dark:border-slate-700"}`}/>
+                        </div>
+                        {errors[f.key] && <p className="text-xs text-red-500 mt-0.5">{errors[f.key]}</p>}
                     </div>
-                </Field>
-                <Field label="Email" error={errors.email}>
-                    <div className="relative">
-                        <IconMail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                        <input type="email" value={form.email} onChange={e => set("email", e.target.value)}
-                            placeholder="email@contoh.com"
-                            className="w-full h-10 pl-9 pr-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 dark:bg-slate-900 dark:text-white"/>
-                    </div>
-                </Field>
+                ))}
                 <div className="grid grid-cols-2 gap-3">
-                    <Field label="Jenis Kelamin">
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Jenis Kelamin</label>
                         <select value={form.gender} onChange={e => set("gender", e.target.value)}
                             className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/20">
                             <option value="">— Pilih —</option>
@@ -244,17 +282,16 @@ function AddCustomerModal({ show, onClose, onSaved }) {
                             <option value="female">Wanita</option>
                             <option value="other">Lainnya</option>
                         </select>
-                    </Field>
-                    <Field label="Tanggal Lahir">
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Tanggal Lahir</label>
                         <input type="date" value={form.birth_date} onChange={e => set("birth_date", e.target.value)}
                             className="w-full h-10 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm dark:bg-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/20"/>
-                    </Field>
+                    </div>
                 </div>
             </div>
             <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex gap-3 flex-shrink-0">
-                <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 font-bold text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition-colors">
-                    Batal
-                </button>
+                <button onClick={onClose} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 font-bold text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition-colors">Batal</button>
                 <button onClick={handleSave} disabled={saving}
                     className="flex-1 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
                     {saving
@@ -264,61 +301,6 @@ function AddCustomerModal({ show, onClose, onSaved }) {
                 </button>
             </div>
         </Modal>
-    );
-}
-
-// ─── Discount Popup ───────────────────────────────────────────────────────────
-function DiscountPopup({ show, onClose, eligibleDiscounts, subtotal, onApply }) {
-    if (!show || eligibleDiscounts.length === 0) return null;
-    const calcDiscount = (d) => {
-        if (d.discount_category === "percentage") {
-            const amt = Math.round(subtotal * (d.value ?? 0) / 100);
-            return d.max_discount_amount ? Math.min(amt, d.max_discount_amount) : amt;
-        }
-        if (d.discount_category === "fixed_amount") return Math.min(Math.round(d.value ?? 0), subtotal);
-        return 0;
-    };
-    return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}/>
-            <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
-                <div className="sm:hidden flex justify-center pt-3 pb-1">
-                    <div className="w-10 h-1 bg-slate-200 dark:bg-slate-700 rounded-full"/>
-                </div>
-                <div className="px-5 pt-4 pb-2 text-center">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-500/30">
-                        <IconGift size={28} className="text-white"/>
-                    </div>
-                    <h3 className="font-black text-lg text-slate-800 dark:text-white">Promo Tersedia! 🎉</h3>
-                    <p className="text-xs text-slate-400 mt-1">Pembelian kamu memenuhi syarat promo berikut</p>
-                </div>
-                <div className="px-4 pb-2 space-y-2 max-h-56 overflow-y-auto">
-                    {eligibleDiscounts.map(d => {
-                        const amt = calcDiscount(d);
-                        return (
-                            <button key={d.id} onClick={() => { onApply({ ...d, amount: amt }); onClose(); }}
-                                className="w-full p-3.5 rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 hover:border-emerald-400 text-left flex items-center gap-3 transition-all group">
-                                <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 flex items-center justify-center flex-shrink-0">
-                                    <IconTag size={16} className="text-emerald-600 dark:text-emerald-400"/>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="font-bold text-sm text-slate-800 dark:text-white truncate">{d.name}</p>
-                                    <p className="text-xs text-slate-500 truncate">{d.description ?? ""}</p>
-                                </div>
-                                <div className="flex-shrink-0 text-right">
-                                    <p className="text-sm font-black text-emerald-600 dark:text-emerald-400">-{fmt(amt)}</p>
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
-                <div className="p-4">
-                    <button onClick={onClose} className="w-full py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-700 font-semibold text-sm text-slate-500 hover:bg-slate-50 transition-colors">
-                        Lewati
-                    </button>
-                </div>
-            </div>
-        </div>
     );
 }
 
@@ -339,11 +321,13 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
     }, [discounts, search, subtotal]);
 
     const calcDiscount = (d) => {
-        if (d.discount_category === "percentage") {
+        if (d.type === "percentage" || d.discount_category === "percentage") {
             const amt = Math.round(subtotal * (d.value ?? 0) / 100);
             return d.max_discount_amount ? Math.min(amt, d.max_discount_amount) : amt;
         }
-        if (d.discount_category === "fixed_amount") return Math.min(Math.round(d.value ?? 0), subtotal);
+        if (d.type === "fixed_amount" || d.discount_category === "fixed_amount") {
+            return Math.min(Math.round(d.value ?? 0), subtotal);
+        }
         return 0;
     };
 
@@ -390,9 +374,7 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
                         {selectedDiscount && (
                             <button onClick={() => { onApply(null); onClose(); }}
                                 className="w-full p-3 rounded-xl border-2 border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-left flex items-center gap-3 hover:bg-red-100 transition-colors">
-                                <div className="w-9 h-9 rounded-lg bg-red-100 dark:bg-red-900/50 flex items-center justify-center flex-shrink-0">
-                                    <IconX size={16} className="text-red-500"/>
-                                </div>
+                                <IconX size={16} className="text-red-500 flex-shrink-0"/>
                                 <p className="text-sm font-semibold text-red-600 dark:text-red-400">Hapus Diskon</p>
                             </button>
                         )}
@@ -400,10 +382,9 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
                             <div className="py-8 text-center">
                                 <IconTag size={32} className="mx-auto mb-2 text-slate-300 dark:text-slate-600"/>
                                 <p className="text-sm text-slate-400">Tidak ada promo yang sesuai</p>
-                                <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">Gunakan tab Manual untuk diskon langsung</p>
                             </div>
                         ) : filtered.map(d => {
-                            const discAmt = calcDiscount(d);
+                            const discAmt  = calcDiscount(d);
                             const isSelected = selectedDiscount?.id === d.id;
                             return (
                                 <button key={d.id} onClick={() => { onApply({ ...d, amount: discAmt }); onClose(); }}
@@ -412,9 +393,9 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
                                         : "border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-800/50 hover:border-primary-300"
                                     }`}>
                                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                                        d.discount_category === "percentage" ? "bg-violet-100 dark:bg-violet-900/40" : "bg-emerald-100 dark:bg-emerald-900/40"
+                                        d.type === "percentage" ? "bg-violet-100 dark:bg-violet-900/40" : "bg-emerald-100 dark:bg-emerald-900/40"
                                     }`}>
-                                        {d.discount_category === "percentage"
+                                        {d.type === "percentage"
                                             ? <IconPercentage size={16} className="text-violet-600 dark:text-violet-400"/>
                                             : <IconCurrencyDollar size={16} className="text-emerald-600 dark:text-emerald-400"/>
                                         }
@@ -440,7 +421,7 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
                     <div className="flex gap-2">
                         {[
                             { key: "percentage", label: "Persentase", icon: <IconPercentage size={14}/> },
-                            { key: "fixed", label: "Nominal (Rp)", icon: <IconCurrencyDollar size={14}/> },
+                            { key: "fixed",      label: "Nominal (Rp)", icon: <IconCurrencyDollar size={14}/> },
                         ].map(t => (
                             <button key={t.key} onClick={() => setManualType(t.key)}
                                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${
@@ -454,7 +435,7 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
                     </div>
                     <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1.5">
-                            {manualType === "percentage" ? "Persentase Diskon (%)" : "Nominal Potongan (Rp)"}
+                            {manualType === "percentage" ? "Persentase (%)" : "Nominal Potongan (Rp)"}
                         </label>
                         <div className="relative">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
@@ -481,7 +462,7 @@ function DiscountModal({ show, onClose, discounts = [], subtotal, selectedDiscou
     );
 }
 
-// ─── Packaging Panel (Staged Selection) ──────────────────────────────────────
+// ─── Packaging Panel ──────────────────────────────────────────────────────────
 const PKG_COLORS = [
     { grad: "from-orange-400 to-amber-500",  light: "bg-orange-50 dark:bg-orange-950/20",  border: "border-orange-300 dark:border-orange-700"  },
     { grad: "from-violet-400 to-purple-500", light: "bg-violet-50 dark:bg-violet-950/20",  border: "border-violet-300 dark:border-violet-700"  },
@@ -504,16 +485,18 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
 
     const stagedCount = useMemo(() => Object.values(staged).reduce((s, q) => s + q, 0), [staged]);
     const stagedTotal = useMemo(() =>
-        packagingMaterials.reduce((sum, pkg) =>
-            sum + Number(pkg.selling_price || 0) * (staged[pkg.id] ?? 0), 0)
+        packagingMaterials.reduce((sum, pkg) => {
+            const effectivePrice = pkg.is_free ? 0 : Number(pkg.selling_price || 0);
+            return sum + effectivePrice * (staged[pkg.id] ?? 0);
+        }, 0)
     , [staged, packagingMaterials]);
     const stagedItems = useMemo(() =>
         packagingMaterials.filter(p => (staged[p.id] ?? 0) > 0)
     , [staged, packagingMaterials]);
 
-    const selectPkg    = (pkg)         => setStaged(p => ({ ...p, [pkg.id]: (p[pkg.id] ?? 0) + 1 }));
-    const clearStaged  = ()            => setStaged({});
-    const updateStaged = (id, delta)   => setStaged(p => {
+    const selectPkg   = (pkg) => setStaged(p => ({ ...p, [pkg.id]: (p[pkg.id] ?? 0) + 1 }));
+    const clearStaged = ()    => setStaged({});
+    const updateStaged = (id, delta) => setStaged(p => {
         const next = (p[id] ?? 0) + delta;
         if (next <= 0) { const c = { ...p }; delete c[id]; return c; }
         return { ...p, [id]: next };
@@ -531,8 +514,6 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
 
     return (
         <div className="flex flex-col h-full">
-
-            {/* ── Search ── */}
             <div className="flex-shrink-0 px-4 pt-3 pb-2">
                 <div className="relative">
                     <IconSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
@@ -542,7 +523,6 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                 </div>
             </div>
 
-            {/* ── Catalog grid ── */}
             <div className="flex-1 overflow-y-auto px-4 pb-3">
                 {filtered.length === 0 ? (
                     <div className="py-16 text-center">
@@ -563,29 +543,32 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                                             ? `${c.border} ${c.light} shadow-md`
                                             : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 hover:border-orange-300 hover:shadow-sm"
                                     }`}>
-
-                                    {/* Illustration */}
                                     <div className={`h-24 bg-gradient-to-br ${c.grad} relative overflow-hidden flex items-center justify-center`}>
                                         <div className="absolute inset-0 opacity-20"
                                             style={{ backgroundImage: "radial-gradient(circle at 25% 75%, white 1px, transparent 1px), radial-gradient(circle at 75% 25%, white 1px, transparent 1px)", backgroundSize: "14px 14px" }}/>
                                         <IconBox size={36} className="text-white drop-shadow-md"/>
 
-                                        {/* Already-in-cart badge */}
+                                        {/* FREE badge */}
+                                        {pkg.is_free && (
+                                            <div className="absolute top-2 left-2 bg-emerald-500 text-white rounded-full px-2 py-0.5 flex items-center gap-1">
+                                                <IconStar size={9} className="fill-white"/>
+                                                <span className="text-[9px] font-black">GRATIS</span>
+                                            </div>
+                                        )}
+
                                         {inCart && (
-                                            <div className="absolute top-2 left-2 bg-white/90 dark:bg-slate-900/80 rounded-lg px-1.5 py-0.5 flex items-center gap-1">
+                                            <div className="absolute top-2 right-2 bg-white/90 dark:bg-slate-900/80 rounded-lg px-1.5 py-0.5 flex items-center gap-1">
                                                 <IconShoppingCart size={9} className="text-primary-500"/>
                                                 <span className="text-[9px] font-bold text-primary-600">{inCart.qty}</span>
                                             </div>
                                         )}
 
-                                        {/* Staged count */}
-                                        {inStage > 0 && (
+                                        {inStage > 0 && !inCart && (
                                             <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center">
                                                 <span className="text-[11px] font-black text-orange-600">{inStage}</span>
                                             </div>
                                         )}
 
-                                        {/* Hover plus */}
                                         {inStage === 0 && (
                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <div className="w-9 h-9 rounded-full bg-white/30 backdrop-blur-sm flex items-center justify-center">
@@ -595,11 +578,19 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                                         )}
                                     </div>
 
-                                    {/* Info */}
                                     <div className="p-3">
                                         <p className="font-bold text-sm text-slate-800 dark:text-white line-clamp-2 leading-tight">{pkg.name}</p>
                                         {pkg.code && <p className="text-[10px] text-slate-400 font-mono mt-0.5">{pkg.code}</p>}
-                                        <p className="text-xs font-black text-orange-600 dark:text-orange-400 mt-1">{fmt(pkg.selling_price)}</p>
+                                        {pkg.is_free ? (
+                                            <div className="flex items-center gap-1.5 mt-1">
+                                                <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">GRATIS</span>
+                                                {pkg.selling_price > 0 && (
+                                                    <span className="text-[10px] line-through text-slate-400">{fmt(pkg.selling_price)}</span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs font-black text-orange-600 dark:text-orange-400 mt-1">{fmt(pkg.selling_price)}</p>
+                                        )}
                                     </div>
                                 </button>
                             );
@@ -608,11 +599,8 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                 )}
             </div>
 
-            {/* ── Staging confirmation bar ── */}
             {stagedCount > 0 && (
                 <div className="flex-shrink-0 border-t-2 border-orange-100 dark:border-orange-900/50 bg-white dark:bg-slate-900 px-4 pt-3 pb-3 space-y-2.5">
-
-                    {/* Title row */}
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-sm">
@@ -628,20 +616,23 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                         </button>
                     </div>
 
-                    {/* Staged items list with qty controls */}
                     <div className="space-y-1.5">
                         {stagedItems.map((pkg, i) => {
                             const c   = PKG_COLORS[i % PKG_COLORS.length];
                             const qty = staged[pkg.id] ?? 0;
+                            const effectivePrice = pkg.is_free ? 0 : Number(pkg.selling_price || 0);
                             return (
-                                <div key={pkg.id}
-                                    className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border-2 ${c.border} ${c.light}`}>
+                                <div key={pkg.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border-2 ${c.border} ${c.light}`}>
                                     <div className={`w-7 h-7 rounded-lg bg-gradient-to-br ${c.grad} flex items-center justify-center flex-shrink-0 shadow-sm`}>
                                         <IconBox size={13} className="text-white"/>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className="text-xs font-semibold text-slate-800 dark:text-white truncate">{pkg.name}</p>
-                                        <p className="text-[10px] text-slate-400">{fmt(pkg.selling_price)} / pcs</p>
+                                        {pkg.is_free ? (
+                                            <p className="text-[10px] text-emerald-600 font-bold">GRATIS</p>
+                                        ) : (
+                                            <p className="text-[10px] text-slate-400">{fmt(pkg.selling_price)} / pcs</p>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-1 flex-shrink-0">
                                         <button onClick={() => updateStaged(pkg.id, -1)}
@@ -654,15 +645,14 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
                                             <IconPlus size={10}/>
                                         </button>
                                     </div>
-                                    <p className="text-xs font-bold text-orange-600 dark:text-orange-400 w-16 text-right flex-shrink-0">
-                                        {fmt(Number(pkg.selling_price || 0) * qty)}
+                                    <p className={`text-xs font-bold w-16 text-right flex-shrink-0 ${pkg.is_free ? "text-emerald-600 dark:text-emerald-400" : "text-orange-600 dark:text-orange-400"}`}>
+                                        {pkg.is_free ? "GRATIS" : fmt(effectivePrice * qty)}
                                     </p>
                                 </div>
                             );
                         })}
                     </div>
 
-                    {/* Total + CTA */}
                     <div className="flex items-center gap-2 pt-0.5">
                         <div className="flex-1 min-w-0">
                             <p className="text-[10px] text-slate-400">Total kemasan</p>
@@ -680,15 +670,16 @@ function PackagingPanel({ packagingMaterials = [], cartPackagings = [], onAddBat
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  MAIN INDEX
+//  MAIN INDEX COMPONENT
+//  Alur: Intensity (grid) → Variant (modal) → Size (modal) → Add to Cart
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Index({
     carts              = [],
     carts_total        = 0,
     heldCarts          = [],
+    intensities        = [],    // ← sebelumnya 'variants'
     customers          = [],
     salesPeople        = [],
-    variants           = [],
     packagingMaterials = [],
     paymentMethods     = [],
     discounts          = [],
@@ -696,7 +687,7 @@ export default function Index({
     storeName          = null,
     error              = null,
 }) {
-    // ── State ──────────────────────────────────────────────────────────────────
+    // ── Customer / Sales ───────────────────────────────────────────────────────
     const [selectedCustomer,     setSelectedCustomer]     = useState(null);
     const [customerSearch,       setCustomerSearch]       = useState("");
     const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -704,49 +695,52 @@ export default function Index({
     const [selectedSalesPerson,  setSelectedSalesPerson]  = useState(null);
     const [salesSearch,          setSalesSearch]          = useState("");
     const [showSalesDropdown,    setShowSalesDropdown]    = useState(false);
-    const [selectedDiscount,     setSelectedDiscount]     = useState(null);
-    const [cashInput,            setCashInput]            = useState("");
-    const [selectedPaymentId,    setSelectedPaymentId]    = useState(null);
-    const [isSubmitting,         setIsSubmitting]         = useState(false);
-    const [showPaymentModal,     setShowPaymentModal]     = useState(false);
-    const [showDiscountModal,    setShowDiscountModal]    = useState(false);
-    const [removingId,           setRemovingId]           = useState(null);
-    const [updatingId,           setUpdatingId]           = useState(null);
-    const [isHolding,            setIsHolding]            = useState(false);
 
-    const [showDiscountPopup,    setShowDiscountPopup]    = useState(false);
-    const [popupDiscounts,       setPopupDiscounts]       = useState([]);
-    const prevCartTotal                                   = useRef(0);
+    // ── Payment ────────────────────────────────────────────────────────────────
+    const [selectedDiscount,   setSelectedDiscount]   = useState(null);
+    const [cashInput,          setCashInput]          = useState("");
+    const [selectedPaymentId,  setSelectedPaymentId]  = useState(null);
+    const [isSubmitting,       setIsSubmitting]       = useState(false);
+    const [showPaymentModal,   setShowPaymentModal]   = useState(false);
+    const [showDiscountModal,  setShowDiscountModal]  = useState(false);
 
-    // Builder
-    const [selectedVariant,      setSelectedVariant]      = useState(null);
-    const [selectedIntensity,    setSelectedIntensity]    = useState(null);
-    const [selectedSize,         setSelectedSize]         = useState(null);
-    const [selectedPkgs,         setSelectedPkgs]         = useState([]);
-    const [builderQty,           setBuilderQty]           = useState(1);
-    const [priceData,            setPriceData]            = useState(null);
-    const [loadingPrice,         setLoadingPrice]         = useState(false);
-    const [addingToCart,         setAddingToCart]         = useState(false);
-    const [availableIntensities, setAvailableIntensities] = useState([]);
-    const [availableSizes,       setAvailableSizes]       = useState([]);
-    const [loadingIntensities,   setLoadingIntensities]   = useState(false);
-    const [loadingSizes,         setLoadingSizes]         = useState(false);
-    const [showIntensityModal,   setShowIntensityModal]   = useState(false);
-    const [showSizeModal,        setShowSizeModal]        = useState(false);
+    // ── Cart state ─────────────────────────────────────────────────────────────
+    const [removingId, setRemovingId] = useState(null);
+    const [updatingId, setUpdatingId] = useState(null);
+    const [isHolding,  setIsHolding]  = useState(false);
 
-    // ── LEFT panel tab: "parfum" | "packaging"
-    const [leftTab,        setLeftTab]        = useState("parfum");
-    // ── Mobile tab: "left" | "cart"
-    const [mobileTab,      setMobileTab]      = useState("left");
-    // ── Cart right panel tab: "items" | "packaging"
-    const [cartTab,        setCartTab]        = useState("items");
+    // ── Builder: ALUR BARU Intensity → Variant → Size ─────────────────────────
+    const [selectedIntensity,  setSelectedIntensity]  = useState(null);   // Step 1
+    const [selectedVariant,    setSelectedVariant]    = useState(null);   // Step 2
+    const [selectedSize,       setSelectedSize]       = useState(null);   // Step 3
+    const [selectedPkgs,       setSelectedPkgs]       = useState([]);
+    const [builderQty,         setBuilderQty]         = useState(1);
+    const [priceData,          setPriceData]          = useState(null);
+    const [loadingPrice,       setLoadingPrice]       = useState(false);
+    const [addingToCart,       setAddingToCart]       = useState(false);
 
-    const [searchVariant,  setSearchVariant]  = useState("");
+    // Modals for step 2 & 3
+    const [availableVariants,   setAvailableVariants]   = useState([]);
+    const [availableSizes,      setAvailableSizes]      = useState([]);
+    const [loadingVariants,     setLoadingVariants]     = useState(false);
+    const [loadingSizes,        setLoadingSizes]        = useState(false);
+    const [showVariantModal,    setShowVariantModal]    = useState(false);
+    const [showSizeModal,       setShowSizeModal]       = useState(false);
+
+    // Variant search/filter inside modal
+    const [variantSearch,  setVariantSearch]  = useState("");
     const [filterGender,   setFilterGender]   = useState("all");
+
+    // ── Tabs ───────────────────────────────────────────────────────────────────
+    const [leftTab,    setLeftTab]    = useState("parfum");
+    const [mobileTab,  setMobileTab]  = useState("left");
+    const [cartTab,    setCartTab]    = useState("items");
+
     const [cartPackagings, setCartPackagings] = useState([]);
 
     const customerRef = useRef(null);
     const salesRef    = useRef(null);
+    const prevCartTotal = useRef(0);
 
     // ── Init ───────────────────────────────────────────────────────────────────
     useEffect(() => { if (error) toast.error(error); }, [error]);
@@ -763,65 +757,50 @@ export default function Index({
         return () => document.removeEventListener("mousedown", handler);
     }, []);
     useEffect(() => {
-        if (selectedVariant && selectedIntensity && selectedSize) fetchPrice();
+        if (selectedIntensity && selectedVariant && selectedSize) fetchPrice();
         else setPriceData(null);
-    }, [selectedVariant, selectedIntensity, selectedSize, selectedPkgs]);
-    useEffect(() => {
-        if (carts_total > prevCartTotal.current && carts_total > 0) checkAutoDiscounts(carts_total);
-        prevCartTotal.current = carts_total;
-    }, [carts_total]);
+    }, [selectedIntensity, selectedVariant, selectedSize, selectedPkgs]);
 
     // ── Derived ────────────────────────────────────────────────────────────────
     const discountAmount = useMemo(() => selectedDiscount?.amount ?? 0, [selectedDiscount]);
     const subtotal       = useMemo(() => carts_total ?? 0, [carts_total]);
     const pkgCartTotal   = useMemo(() =>
-        cartPackagings.reduce((s, p) => s + Number(p.pkg.selling_price || 0) * p.qty, 0)
+        cartPackagings.reduce((s, p) => {
+            const ep = p.pkg.is_free ? 0 : Number(p.pkg.selling_price || 0);
+            return s + ep * p.qty;
+        }, 0)
     , [cartPackagings]);
     const payable        = useMemo(() => Math.max(subtotal + pkgCartTotal - discountAmount, 0), [subtotal, pkgCartTotal, discountAmount]);
     const cartCount      = useMemo(() => carts.reduce((t, i) => t + Number(i.qty), 0), [carts]);
     const pkgCartCount   = useMemo(() => cartPackagings.reduce((s, p) => s + p.qty, 0), [cartPackagings]);
     const selectedMethod = paymentMethods.find(m => m.id === selectedPaymentId);
-    const isCash         = !selectedMethod || selectedMethod.type === "cash";
+    const isCash         = !selectedMethod || selectedMethod.type === "cash" || selectedMethod.can_give_change;
     const cash           = useMemo(
         () => (isCash ? Math.max(0, Number(cashInput) || 0) : payable),
         [cashInput, isCash, payable]
     );
-    const kembalian = Math.max(0, cash - payable);
+    const kembalian      = Math.max(0, cash - payable);
+    const isReadyToAdd   = selectedIntensity && selectedVariant && selectedSize;
+
     useEffect(() => { if (!isCash) setCashInput(String(payable)); }, [isCash, payable]);
-    const isReadyToAdd = selectedVariant && selectedIntensity && selectedSize;
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
-    const checkAutoDiscounts = (total) => {
-        const eligible = discounts.filter(d => {
-            if (!d.is_active) return false;
-            if (d.min_purchase_amount && total < d.min_purchase_amount) return false;
-            if (selectedDiscount?.id === d.id) return false;
-            return true;
-        });
-        if (eligible.length > 0) { setPopupDiscounts(eligible); setShowDiscountPopup(true); }
-    };
-
-    const getCartItemTotal = (item) => {
-        const pkgTotal = (item.packagings ?? []).reduce((s, p) =>
-            s + Number(p.unit_price || 0) * Number(p.qty || 1), 0);
-        return (Number(item.unit_price || 0) + pkgTotal) * Number(item.qty || 1);
-    };
-
-    // ── AJAX ───────────────────────────────────────────────────────────────────
-    const fetchIntensities = async (variantId) => {
-        setLoadingIntensities(true); setAvailableIntensities([]);
+    // ── AJAX Fetchers ──────────────────────────────────────────────────────────
+    const fetchVariants = async (intensityId) => {
+        setLoadingVariants(true); setAvailableVariants([]);
         try {
-            const res = await axios.get(route("transactions.get-intensities"), { params: { variant_id: variantId } });
-            if (res.data.success) setAvailableIntensities(res.data.data);
-            else toast.error(res.data.message ?? "Gagal memuat intensitas");
-        } catch { toast.error("Gagal memuat intensitas"); }
-        finally { setLoadingIntensities(false); }
+            const res = await axios.get(route("transactions.get-variants"), { params: { intensity_id: intensityId } });
+            if (res.data.success) setAvailableVariants(res.data.data);
+            else toast.error(res.data.message ?? "Gagal memuat varian");
+        } catch { toast.error("Gagal memuat varian"); }
+        finally { setLoadingVariants(false); }
     };
 
-    const fetchSizes = async (variantId, intensityId) => {
+    const fetchSizes = async (intensityId, variantId) => {
         setLoadingSizes(true); setAvailableSizes([]);
         try {
-            const res = await axios.get(route("transactions.get-sizes"), { params: { variant_id: variantId, intensity_id: intensityId } });
+            const res = await axios.get(route("transactions.get-sizes"), {
+                params: { intensity_id: intensityId, variant_id: variantId }
+            });
             if (res.data.success) setAvailableSizes(res.data.data);
             else toast.error(res.data.message ?? "Gagal memuat ukuran");
         } catch { toast.error("Gagal memuat ukuran"); }
@@ -832,8 +811,10 @@ export default function Index({
         setLoadingPrice(true);
         try {
             const res = await axios.post(route("transactions.get-perfume-price"), {
-                variant_id: selectedVariant.id, intensity_id: selectedIntensity.id,
-                size_id: selectedSize.id, packaging_ids: selectedPkgs,
+                intensity_id:  selectedIntensity.id,
+                variant_id:    selectedVariant.id,
+                size_id:       selectedSize.id,
+                packaging_ids: selectedPkgs,
             });
             if (res.data.success) setPriceData(res.data.data);
             else { toast.error(res.data.message); setPriceData(null); }
@@ -842,41 +823,64 @@ export default function Index({
         } finally { setLoadingPrice(false); }
     };
 
-    // ── Builder actions ────────────────────────────────────────────────────────
-    const selectVariant = (v) => {
-        setSelectedVariant(v); setSelectedIntensity(null); setSelectedSize(null);
-        setSelectedPkgs([]); setPriceData(null);
-        setAvailableIntensities([]); setAvailableSizes([]);
-        setShowIntensityModal(true); fetchIntensities(v.id);
-    };
+    // ── Builder Actions ────────────────────────────────────────────────────────
 
+    /** STEP 1: Pilih Intensity → buka modal Variant */
     const selectIntensity = (intensity) => {
-        setSelectedIntensity(intensity); setSelectedSize(null); setPriceData(null); setAvailableSizes([]);
-        setTimeout(() => setShowSizeModal(true), 100);
-        fetchSizes(selectedVariant.id, intensity.id);
+        setSelectedIntensity(intensity);
+        setSelectedVariant(null);
+        setSelectedSize(null);
+        setSelectedPkgs([]);
+        setPriceData(null);
+        setAvailableVariants([]);
+        setAvailableSizes([]);
+        setVariantSearch("");
+        setFilterGender("all");
+        setShowVariantModal(true);
+        fetchVariants(intensity.id);
     };
 
+    /** STEP 2: Pilih Variant → buka modal Size */
+    const selectVariant = (variant) => {
+        setSelectedVariant(variant);
+        setSelectedSize(null);
+        setPriceData(null);
+        setAvailableSizes([]);
+        setTimeout(() => setShowSizeModal(true), 80);
+        fetchSizes(selectedIntensity.id, variant.id);
+    };
+
+    /** STEP 3: Pilih Size */
     const selectSize = (size) => { setSelectedSize(size); };
 
     const togglePkg = (pkgId) =>
         setSelectedPkgs(prev => prev.includes(pkgId) ? prev.filter(id => id !== pkgId) : [...prev, pkgId]);
 
     const resetBuilder = () => {
-        setSelectedVariant(null); setSelectedIntensity(null); setSelectedSize(null);
+        setSelectedIntensity(null); setSelectedVariant(null); setSelectedSize(null);
         setSelectedPkgs([]); setBuilderQty(1); setPriceData(null);
-        setAvailableIntensities([]); setAvailableSizes([]); setSearchVariant("");
+        setAvailableVariants([]); setAvailableSizes([]);
     };
 
-    // ── Cart actions ───────────────────────────────────────────────────────────
+    // ── Cart Actions ───────────────────────────────────────────────────────────
     const handleAddToCart = () => {
-        if (!selectedVariant || !selectedIntensity || !selectedSize) { toast.error("Lengkapi pilihan"); return; }
+        if (!selectedIntensity || !selectedVariant || !selectedSize) { toast.error("Lengkapi pilihan"); return; }
         setAddingToCart(true);
         router.post(route("transactions.add-to-cart"), {
-            variant_id: selectedVariant.id, intensity_id: selectedIntensity.id,
-            size_id: selectedSize.id, packaging_ids: selectedPkgs, qty: builderQty,
+            intensity_id:  selectedIntensity.id,
+            variant_id:    selectedVariant.id,
+            size_id:       selectedSize.id,
+            packaging_ids: selectedPkgs,
+            qty:           builderQty,
         }, {
             preserveScroll: true, preserveState: true, only: ["carts", "carts_total"],
-            onSuccess: () => { toast.success("Ditambahkan ke keranjang"); resetBuilder(); setAddingToCart(false); setMobileTab("cart"); },
+            onSuccess: () => {
+                toast.success("Ditambahkan ke keranjang");
+                resetBuilder();
+                setAddingToCart(false);
+                setMobileTab("cart");
+                setCartTab("items");
+            },
             onError: (errs) => { toast.error(errs?.message || "Gagal menambahkan"); setAddingToCart(false); },
         });
     };
@@ -891,7 +895,6 @@ export default function Index({
             });
             return updated;
         });
-        // Switch right panel to show packaging summary
         setCartTab("packaging");
     };
 
@@ -953,36 +956,25 @@ export default function Index({
         if (isCash && cash < payable) { toast.error("Jumlah bayar kurang dari total"); return; }
         setIsSubmitting(true);
         router.post(route("transactions.store"), {
-            customer_id: selectedCustomer?.id ?? null,
-            sales_person_id: selectedSalesPerson?.id ?? null,
-            payment_method_id: selectedPaymentId,
-            discount_type_id: selectedDiscount?.id !== "__manual__" ? (selectedDiscount?.id ?? null) : null,
-            discount_amount: discountAmount,
-            cash_amount: isCash ? cash : null,
-            standalone_packagings: cartPackagings.map(p => ({ packaging_material_id: p.pkg.id, qty: p.qty })),
+            customer_id:        selectedCustomer?.id ?? null,
+            sales_person_id:    selectedSalesPerson?.id ?? null,
+            payment_method_id:  selectedPaymentId,
+            discount_type_id:   selectedDiscount?.id !== "__manual__" ? (selectedDiscount?.id ?? null) : null,
+            discount_amount:    discountAmount,
+            cash_amount:        isCash ? cash : null,
+            standalone_packagings: cartPackagings.map(p => ({
+                packaging_material_id: p.pkg.id, qty: p.qty
+            })),
         }, {
-            onSuccess: () => {
-                setCashInput(""); setSelectedCustomer(null); setSelectedSalesPerson(null);
-                setSelectedDiscount(null); setCartPackagings([]);
-                setSelectedPaymentId(paymentMethods[0]?.id ?? null);
-                setIsSubmitting(false); setShowPaymentModal(false);
-                toast.success("Transaksi berhasil!");
+            // onSuccess sengaja tidak di-set agar Inertia follow redirect ke halaman print
+            onError: (errs) => {
+                setIsSubmitting(false);
+                toast.error(errs?.message || "Gagal menyimpan transaksi");
             },
-            onError: (errs) => { setIsSubmitting(false); toast.error(errs?.message || "Gagal menyimpan transaksi"); },
         });
     };
 
-    // ── Filtered data ──────────────────────────────────────────────────────────
-    const filteredVariants = useMemo(() => {
-        let f = variants;
-        if (filterGender !== "all") f = f.filter(v => v.gender === filterGender);
-        if (searchVariant) f = f.filter(v =>
-            v.name.toLowerCase().includes(searchVariant.toLowerCase()) ||
-            (v.code ?? "").toLowerCase().includes(searchVariant.toLowerCase())
-        );
-        return f;
-    }, [variants, filterGender, searchVariant]);
-
+    // ── Filtered customers/sales ───────────────────────────────────────────────
     const filteredCustomers = useMemo(() => {
         const list = customerSearch
             ? customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.phone ?? "").includes(customerSearch))
@@ -997,30 +989,44 @@ export default function Index({
         return list.slice(0, 10);
     }, [salesPeople, salesSearch]);
 
-    // ══════════════════════════════════════════════════════════════════════════
+    const getCartItemTotal = (item) => {
+        const pkgTotal = (item.packagings ?? []).reduce((s, p) =>
+            s + Number(p.unit_price || 0) * Number(p.qty || 1), 0);
+        return (Number(item.unit_price || 0) + pkgTotal / (item.qty || 1)) * Number(item.qty || 1);
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════════
     return (
         <>
             <Head title="Transaksi POS"/>
 
-            <IntensityModal show={showIntensityModal} onClose={() => setShowIntensityModal(false)}
-                variant={selectedVariant} intensities={availableIntensities} loading={loadingIntensities} onSelect={selectIntensity}/>
-            <SizeModal show={showSizeModal} onClose={() => setShowSizeModal(false)}
-                variant={selectedVariant} intensity={selectedIntensity} sizes={availableSizes} loading={loadingSizes} onSelect={selectSize}/>
+            {/* Modals */}
+            <VariantModal
+                show={showVariantModal} onClose={() => setShowVariantModal(false)}
+                intensity={selectedIntensity} variants={availableVariants} loading={loadingVariants}
+                onSelect={selectVariant}
+                searchTerm={variantSearch} setSearchTerm={setVariantSearch}
+                filterGender={filterGender} setFilterGender={setFilterGender}
+            />
+            <SizeModal
+                show={showSizeModal} onClose={() => setShowSizeModal(false)}
+                variant={selectedVariant} intensity={selectedIntensity}
+                sizes={availableSizes} loading={loadingSizes} onSelect={selectSize}
+            />
             <AddCustomerModal show={showAddCustomer} onClose={() => setShowAddCustomer(false)} onSaved={c => setSelectedCustomer(c)}/>
-            <DiscountModal show={showDiscountModal} onClose={() => setShowDiscountModal(false)}
+            <DiscountModal
+                show={showDiscountModal} onClose={() => setShowDiscountModal(false)}
                 discounts={discounts} subtotal={subtotal + pkgCartTotal}
-                selectedDiscount={selectedDiscount} onApply={setSelectedDiscount}/>
-            <DiscountPopup show={showDiscountPopup} onClose={() => setShowDiscountPopup(false)}
-                eligibleDiscounts={popupDiscounts} subtotal={subtotal + pkgCartTotal}
-                onApply={(d) => { setSelectedDiscount(d); setShowDiscountPopup(false); }}/>
+                selectedDiscount={selectedDiscount} onApply={setSelectedDiscount}
+            />
 
             <div className="h-[calc(100vh-4rem)] flex flex-col lg:flex-row overflow-hidden bg-slate-50 dark:bg-slate-950">
 
-                {/* ── Mobile top bar (only 2 tabs now) ── */}
+                {/* ── Mobile top bar ── */}
                 <div className="lg:hidden flex-shrink-0 flex border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                     {[
-                        { key: "left",  label: "Produk", icon: <IconBottle size={15}/> },
-                        { key: "cart",  label: "Keranjang", icon: <IconShoppingCart size={15}/>, badge: cartCount },
+                        { key: "left", label: "Parfum / Kemasan", icon: <IconBottle size={15}/> },
+                        { key: "cart", label: "Keranjang", icon: <IconShoppingCart size={15}/>, badge: cartCount },
                     ].map(tab => (
                         <button key={tab.key} onClick={() => setMobileTab(tab.key)}
                             className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-semibold relative transition-colors ${
@@ -1028,7 +1034,7 @@ export default function Index({
                             }`}>
                             {tab.icon} {tab.label}
                             {tab.badge > 0 && (
-                                <span className="absolute top-2 right-[22%] w-4 h-4 text-[9px] font-bold bg-primary-500 text-white rounded-full flex items-center justify-center">
+                                <span className="absolute top-2 right-[18%] w-4 h-4 text-[9px] font-bold bg-primary-500 text-white rounded-full flex items-center justify-center">
                                     {tab.badge}
                                 </span>
                             )}
@@ -1037,29 +1043,23 @@ export default function Index({
                 </div>
 
                 {/* ══════════════════════════════════════════════════════════════
-                    LEFT PANEL — contains both Parfum & Kemasan as inner tabs
+                    LEFT PANEL
                 ══════════════════════════════════════════════════════════════ */}
                 <div className={`flex-1 flex flex-col overflow-hidden ${mobileTab !== "left" ? "hidden lg:flex" : "flex"}`}>
 
-                    {/* ── Inner tab bar: Parfum / Kemasan ── */}
+                    {/* Inner tabs */}
                     <div className="flex-shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex">
                         <button onClick={() => setLeftTab("parfum")}
                             className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold transition-colors ${
-                                leftTab === "parfum"
-                                    ? "text-primary-600 border-b-2 border-primary-500"
-                                    : "text-slate-400 hover:text-slate-600"
+                                leftTab === "parfum" ? "text-primary-600 border-b-2 border-primary-500" : "text-slate-400 hover:text-slate-600"
                             }`}>
-                            <IconBottle size={15}/>
-                            Parfum
+                            <IconFlask size={15}/> Parfum
                         </button>
                         <button onClick={() => setLeftTab("packaging")}
                             className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold transition-colors ${
-                                leftTab === "packaging"
-                                    ? "text-orange-600 border-b-2 border-orange-500"
-                                    : "text-slate-400 hover:text-slate-600"
+                                leftTab === "packaging" ? "text-orange-600 border-b-2 border-orange-500" : "text-slate-400 hover:text-slate-600"
                             }`}>
-                            <IconPackage size={15}/>
-                            Kemasan
+                            <IconPackage size={15}/> Kemasan
                             {pkgCartCount > 0 && (
                                 <span className="px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-full text-[10px] font-bold">
                                     {pkgCartCount}
@@ -1071,98 +1071,70 @@ export default function Index({
                     {/* ── PARFUM TAB ── */}
                     {leftTab === "parfum" && (
                         <>
-                            {/* Header: search + gender filter */}
+                            {/* Header */}
                             <div className="flex-shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 pt-3 pb-3">
-                                <div className="flex items-center justify-between mb-2">
-                                    <h2 className="font-bold text-slate-800 dark:text-white text-sm">Pilih Varian Parfum</h2>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h2 className="font-bold text-slate-800 dark:text-white text-sm">
+                                            Langkah 1: Pilih Konsentrasi
+                                        </h2>
+                                        <p className="text-[11px] text-slate-400 mt-0.5">Intensity → Varian → Ukuran</p>
+                                    </div>
                                     {storeName && (
                                         <span className="text-[10px] text-slate-400 font-medium bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-lg">
                                             🏪 {storeName}
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex gap-2 mb-2.5">
-                                    <div className="relative flex-1">
-                                        <IconSearch size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                                        <input type="text" placeholder="Cari varian..." value={searchVariant}
-                                            onChange={e => setSearchVariant(e.target.value)}
-                                            className="w-full h-9 pl-9 pr-8 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"/>
-                                        {searchVariant && (
-                                            <button onClick={() => setSearchVariant("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                                                <IconX size={13}/>
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                                    {[
-                                        { value: "all",    label: "Semua", icon: "🌟" },
-                                        { value: "male",   label: "Pria",  icon: "👔" },
-                                        { value: "female", label: "Wanita", icon: "👗" },
-                                        { value: "unisex", label: "Unisex", icon: "⚡" },
-                                    ].map(g => (
-                                        <button key={g.value} onClick={() => setFilterGender(g.value)}
-                                            className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all ${
-                                                filterGender === g.value
-                                                    ? "bg-primary-500 text-white shadow-md shadow-primary-500/30"
-                                                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100"
-                                            }`}>
-                                            {g.icon} {g.label}
-                                        </button>
-                                    ))}
-                                </div>
                             </div>
 
-                            {/* Variant grid */}
+                            {/* Intensity grid */}
                             <div className="flex-1 overflow-y-auto p-4">
-                                {filteredVariants.length > 0 ? (
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                                        {filteredVariants.map(variant => {
-                                            const isSelected = selectedVariant?.id === variant.id;
+                                {intensities.length > 0 ? (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        {intensities.map((intensity, i) => {
+                                            const grad      = INTENSITY_GRADIENTS[i % INTENSITY_GRADIENTS.length];
+                                            const isSelected = selectedIntensity?.id === intensity.id;
+                                            const oilPct    = parseFloat(intensity.oil_ratio) || 0;
+
                                             return (
-                                                <button key={variant.id} onClick={() => selectVariant(variant)}
-                                                    className={`group relative bg-white dark:bg-slate-900 rounded-2xl border-2 transition-all overflow-hidden text-left ${
+                                                <button key={intensity.id}
+                                                    onClick={() => selectIntensity(intensity)}
+                                                    className={`group relative p-4 rounded-2xl border-2 text-left transition-all ${
                                                         isSelected
-                                                            ? "border-primary-500 shadow-lg shadow-primary-500/20 ring-2 ring-primary-500/20"
-                                                            : "border-slate-200 dark:border-slate-700 hover:border-primary-300 hover:shadow-md"
+                                                            ? "border-primary-500 shadow-lg shadow-primary-500/20 ring-2 ring-primary-500/20 bg-primary-50/50 dark:bg-primary-950/20"
+                                                            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-primary-300 hover:shadow-md"
                                                     }`}>
-                                                    <div className="aspect-square bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 relative overflow-hidden">
-                                                        {variant.image ? (
-                                                            <img src={`/storage/${variant.image}`} alt={variant.name}
-                                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/>
-                                                        ) : (
-                                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                                <IconBottle size={40} className="text-slate-300 dark:text-slate-600"/>
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center shadow-lg flex-shrink-0`}>
+                                                            <IconFlask size={22} className="text-white"/>
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-black text-slate-800 dark:text-white text-base">{intensity.name}</span>
+                                                                <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-bold">{intensity.code}</span>
                                                             </div>
-                                                        )}
-                                                        {variant.gender && (
-                                                            <span className="absolute top-2 right-2 bg-white/90 dark:bg-slate-900/90 rounded-full w-7 h-7 flex items-center justify-center shadow text-sm">
-                                                                {GENDER_ICON[variant.gender] ?? ""}
-                                                            </span>
-                                                        )}
-                                                        {isSelected && (
-                                                            <div className="absolute inset-0 bg-primary-600/10 flex items-center justify-center">
-                                                                <div className="w-10 h-10 rounded-full bg-primary-500 flex items-center justify-center shadow-lg">
-                                                                    <IconCheck size={20} className="text-white"/>
-                                                                </div>
+                                                            <div className="flex items-center gap-3 mt-0.5">
+                                                                <span className="text-xs text-slate-500">Oil <strong className="text-slate-700 dark:text-slate-200">{intensity.oil_ratio}%</strong></span>
+                                                                <span className="text-xs text-slate-500">Alk <strong className="text-slate-700 dark:text-slate-200">{intensity.alcohol_ratio}%</strong></span>
                                                             </div>
-                                                        )}
+                                                        </div>
                                                     </div>
-                                                    <div className="p-3">
-                                                        <p className="font-bold text-slate-800 dark:text-white text-sm line-clamp-2 leading-tight">{variant.name}</p>
-                                                        <p className="text-xs text-slate-400 mt-0.5">{variant.code}</p>
-                                                        {isSelected && selectedIntensity && (
-                                                            <div className="mt-1.5 flex flex-wrap gap-1">
-                                                                <span className="px-1.5 py-0.5 bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 text-[10px] font-bold rounded">
-                                                                    {selectedIntensity.code}
-                                                                </span>
-                                                                {selectedSize && (
-                                                                    <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[10px] font-bold rounded">
-                                                                        {selectedSize.volume_ml}ml
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        )}
+
+                                                    {/* Oil ratio bar */}
+                                                    <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                                                        <div className={`h-full bg-gradient-to-r ${grad} rounded-full`} style={{ width: `${Math.min(oilPct, 100)}%` }}/>
+                                                    </div>
+
+                                                    {isSelected && (
+                                                        <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-primary-500 flex items-center justify-center shadow">
+                                                            <IconCheck size={13} className="text-white"/>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mt-2 flex items-center justify-between">
+                                                        <span className="text-[10px] text-slate-400">Klik untuk pilih varian</span>
+                                                        <IconChevronRight size={14} className="text-slate-300 group-hover:text-primary-500 transition-colors"/>
                                                     </div>
                                                 </button>
                                             );
@@ -1170,37 +1142,35 @@ export default function Index({
                                     </div>
                                 ) : (
                                     <div className="text-center py-16">
-                                        <IconBottle size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3"/>
-                                        <p className="text-slate-500 font-medium">Varian tidak ditemukan</p>
-                                        <button onClick={() => { setSearchVariant(""); setFilterGender("all"); }}
-                                            className="mt-2 text-sm text-primary-500 hover:text-primary-600 font-semibold">
-                                            Reset Filter
-                                        </button>
+                                        <IconFlask size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3"/>
+                                        <p className="text-slate-500 font-medium">Belum ada intensitas tersedia</p>
+                                        <p className="text-xs text-slate-400 mt-1">Hubungi admin untuk menambahkan intensitas</p>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Konfirmasi bar */}
+                            {/* Konfirmasi bar — setelah semua step selesai */}
                             {isReadyToAdd && (
                                 <div className="flex-shrink-0 border-t-2 border-primary-100 dark:border-primary-900/50 bg-white dark:bg-slate-900 px-3 pt-3 pb-3 space-y-2.5">
+                                    {/* Breadcrumb */}
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="flex items-center gap-1 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300">
+                                        <button onClick={() => { setShowVariantModal(false); }}
+                                            className="flex items-center gap-1 px-2 py-1 bg-violet-100 dark:bg-violet-900/40 rounded-lg text-xs font-bold text-violet-700 dark:text-violet-300 hover:bg-violet-200 transition-colors">
+                                            <IconFlask size={11} className="text-violet-500"/> {selectedIntensity.name} ({selectedIntensity.code})
+                                        </button>
+                                        <IconChevronRight size={11} className="text-slate-300 flex-shrink-0"/>
+                                        <button onClick={() => setShowVariantModal(true)}
+                                            className="flex items-center gap-1 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-200 transition-colors">
                                             <IconBottle size={11} className="text-primary-500"/> {selectedVariant.name}
-                                        </span>
+                                        </button>
                                         <IconChevronRight size={11} className="text-slate-300 flex-shrink-0"/>
-                                        <span className="px-2 py-1 bg-violet-100 dark:bg-violet-900/40 rounded-lg text-xs font-bold text-violet-700 dark:text-violet-300">
-                                            {selectedIntensity.name} ({selectedIntensity.code})
-                                        </span>
-                                        <IconChevronRight size={11} className="text-slate-300 flex-shrink-0"/>
-                                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/40 rounded-lg text-xs font-bold text-blue-700 dark:text-blue-300">
+                                        <button onClick={() => setShowSizeModal(true)}
+                                            className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/40 rounded-lg text-xs font-bold text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition-colors">
                                             {selectedSize.volume_ml}ml
-                                        </span>
-                                        <button onClick={() => setShowIntensityModal(true)}
-                                            className="ml-auto text-[11px] text-slate-400 hover:text-primary-500 font-semibold transition-colors px-2 py-1 hover:bg-primary-50 dark:hover:bg-primary-950/20 rounded-lg">
-                                            ✎ Ganti
                                         </button>
                                     </div>
 
+                                    {/* Packaging add-ons */}
                                     {packagingMaterials.length > 0 && (
                                         <div>
                                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1">
@@ -1218,7 +1188,11 @@ export default function Index({
                                                             }`}>
                                                             <IconPackage size={11} className={isOn ? "text-primary-500" : ""}/>
                                                             {pkg.name}
-                                                            <span className="text-primary-500 font-bold">+{fmt(pkg.selling_price)}</span>
+                                                            {pkg.is_free ? (
+                                                                <span className="text-emerald-600 font-black">GRATIS</span>
+                                                            ) : (
+                                                                <span className="text-primary-500 font-bold">+{fmt(pkg.selling_price)}</span>
+                                                            )}
                                                             {isOn && <IconCheck size={10} className="text-primary-500"/>}
                                                         </button>
                                                     );
@@ -1227,6 +1201,7 @@ export default function Index({
                                         </div>
                                     )}
 
+                                    {/* Qty + Harga + CTA */}
                                     <div className="flex items-center gap-2">
                                         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1.5">
                                             <button onClick={() => setBuilderQty(Math.max(1, builderQty - 1))}
@@ -1267,13 +1242,6 @@ export default function Index({
                                             }
                                         </button>
                                     </div>
-
-                                    {priceData && !priceData.stock_available && (
-                                        <div className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl">
-                                            <IconAlertTriangle size={14} className="text-amber-500 flex-shrink-0"/>
-                                            <p className="text-xs text-amber-700 dark:text-amber-400">Stok bahan baku mungkin tidak mencukupi</p>
-                                        </div>
-                                    )}
                                 </div>
                             )}
                         </>
@@ -1432,14 +1400,13 @@ export default function Index({
                         </div>
                     )}
 
-                    {/* Cart inner tabs: Parfum items | Kemasan items */}
+                    {/* Cart tabs */}
                     <div className="flex-shrink-0 flex border-b border-slate-200 dark:border-slate-800">
                         <button onClick={() => setCartTab("items")}
                             className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
                                 cartTab === "items" ? "text-primary-600 border-b-2 border-primary-500" : "text-slate-400 hover:text-slate-600"
                             }`}>
-                            <IconShoppingCart size={13}/>
-                            Parfum
+                            <IconShoppingCart size={13}/> Parfum
                             {cartCount > 0 && (
                                 <span className="px-1.5 py-0.5 bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 rounded-full text-[10px] font-bold">{cartCount}</span>
                             )}
@@ -1448,8 +1415,7 @@ export default function Index({
                             className={`flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
                                 cartTab === "packaging" ? "text-orange-600 border-b-2 border-orange-500" : "text-slate-400 hover:text-slate-600"
                             }`}>
-                            <IconPackage size={13}/>
-                            Kemasan
+                            <IconPackage size={13}/> Kemasan
                             {pkgCartCount > 0 && (
                                 <span className="px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-full text-[10px] font-bold">{pkgCartCount}</span>
                             )}
@@ -1461,7 +1427,7 @@ export default function Index({
                         {cartTab === "items" ? (
                             <div className="p-3">
                                 <div className="flex items-center justify-between mb-2">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Items</p>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Items Parfum</p>
                                     {carts.length > 0 && (
                                         <button onClick={handleHold} disabled={isHolding}
                                             className="text-[11px] text-amber-600 font-bold hover:text-amber-700 flex items-center gap-1 px-2 py-1 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-lg transition-colors">
@@ -1483,10 +1449,22 @@ export default function Index({
                                                         </p>
                                                         <p className="text-[11px] text-slate-400 mt-0.5">
                                                             {item.intensity?.code} · {item.size?.volume_ml}ml
-                                                            {(item.packagings ?? []).length > 0 && (
-                                                                <span> · {item.packagings.map(p => p.packaging_material?.name ?? "Kemasan").join(", ")}</span>
-                                                            )}
                                                         </p>
+                                                        {/* Packaging per item */}
+                                                        {(item.packagings ?? []).length > 0 && (
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {item.packagings.map((p, pi) => (
+                                                                    <span key={pi} className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                                                                        p.packaging_material?.is_free
+                                                                            ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                                                                            : "bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300"
+                                                                    }`}>
+                                                                        {p.packaging_material?.name ?? "Kemasan"}
+                                                                        {p.packaging_material?.is_free && " 🎁"}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                         <p className="text-xs font-bold text-primary-600 dark:text-primary-400 mt-0.5">
                                                             {fmt(getCartItemTotal(item))}
                                                         </p>
@@ -1521,29 +1499,37 @@ export default function Index({
                                     <div className="py-10 text-center">
                                         <IconShoppingCart size={36} className="mx-auto text-slate-200 dark:text-slate-700 mb-2"/>
                                         <p className="text-sm text-slate-400 font-medium">Keranjang kosong</p>
-                                        <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">Tap varian parfum untuk memilih</p>
+                                        <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">Pilih konsentrasi di panel kiri</p>
                                     </div>
                                 )}
                             </div>
                         ) : (
-                            /* Packaging cart tab — just shows what's been added with qty controls */
                             <div className="p-3">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                                    <IconPackage size={10}/> Kemasan di Keranjang
+                                    <IconPackage size={10}/> Kemasan Standalone
                                 </p>
                                 {cartPackagings.length > 0 ? (
                                     <div className="space-y-2">
                                         {cartPackagings.map(({ pkg, qty }, i) => {
-                                            const c = PKG_COLORS[i % PKG_COLORS.length];
+                                            const c          = PKG_COLORS[i % PKG_COLORS.length];
+                                            const effectiveP = pkg.is_free ? 0 : Number(pkg.selling_price || 0);
                                             return (
-                                                <div key={pkg.id}
-                                                    className={`flex items-center gap-3 p-3 rounded-xl border-2 ${c.border} ${c.light}`}>
+                                                <div key={pkg.id} className={`flex items-center gap-3 p-3 rounded-xl border-2 ${c.border} ${c.light}`}>
                                                     <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${c.grad} flex items-center justify-center flex-shrink-0 shadow-sm`}>
                                                         <IconBox size={16} className="text-white"/>
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{pkg.name}</p>
-                                                        <p className="text-xs text-slate-400">{fmt(pkg.selling_price)} / pcs</p>
+                                                        <div className="flex items-center gap-1">
+                                                            <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{pkg.name}</p>
+                                                            {pkg.is_free && (
+                                                                <span className="flex-shrink-0 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-black rounded">GRATIS</span>
+                                                            )}
+                                                        </div>
+                                                        {pkg.is_free ? (
+                                                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">Gratis</p>
+                                                        ) : (
+                                                            <p className="text-xs text-slate-400">{fmt(pkg.selling_price)} / pcs</p>
+                                                        )}
                                                     </div>
                                                     <div className="flex items-center gap-1 flex-shrink-0">
                                                         <button onClick={() => handleUpdatePkgQty(pkg.id, -1)}
@@ -1556,8 +1542,8 @@ export default function Index({
                                                             <IconPlus size={10}/>
                                                         </button>
                                                     </div>
-                                                    <p className="text-xs font-bold text-orange-600 dark:text-orange-400 w-16 text-right flex-shrink-0">
-                                                        {fmt(Number(pkg.selling_price || 0) * qty)}
+                                                    <p className={`text-xs font-bold w-16 text-right flex-shrink-0 ${pkg.is_free ? "text-emerald-600 dark:text-emerald-400" : "text-orange-600 dark:text-orange-400"}`}>
+                                                        {pkg.is_free ? "GRATIS" : fmt(effectiveP * qty)}
                                                     </p>
                                                 </div>
                                             );
@@ -1569,7 +1555,7 @@ export default function Index({
                                         <p className="text-sm text-slate-400 font-medium">Belum ada kemasan</p>
                                         <button onClick={() => setLeftTab("packaging")}
                                             className="mt-2 text-xs text-orange-500 hover:text-orange-600 font-bold flex items-center gap-1 mx-auto">
-                                            <IconPackage size={12}/> Pilih kemasan di tab Parfum
+                                            <IconPackage size={12}/> Pilih kemasan di tab Kemasan
                                         </button>
                                     </div>
                                 )}
@@ -1617,6 +1603,17 @@ export default function Index({
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">Kemasan</span>
                                     <span className="font-medium text-slate-700 dark:text-slate-300">{fmt(pkgCartTotal)}</span>
+                                </div>
+                            )}
+                            {/* Show free packaging count */}
+                            {cartPackagings.some(p => p.pkg.is_free) && (
+                                <div className="flex justify-between">
+                                    <span className="text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-1">
+                                        🎁 Kemasan gratis
+                                    </span>
+                                    <span className="text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+                                        {cartPackagings.filter(p => p.pkg.is_free).reduce((s, p) => s + p.qty, 0)}x
+                                    </span>
                                 </div>
                             )}
                             {discountAmount > 0 && (
@@ -1683,6 +1680,13 @@ export default function Index({
                                         <span className="font-medium">{fmt(pkgCartTotal)}</span>
                                     </div>
                                 )}
+                                {/* Free packaging info */}
+                                {cartPackagings.some(p => p.pkg.is_free) && (
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-emerald-600 dark:text-emerald-400">🎁 Kemasan gratis ({cartPackagings.filter(p => p.pkg.is_free).reduce((s,p)=>s+p.qty,0)}x)</span>
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Rp 0</span>
+                                    </div>
+                                )}
                                 {discountAmount > 0 && (
                                     <div className="flex justify-between text-sm">
                                         <span className="text-emerald-600 dark:text-emerald-400">{selectedDiscount?.name}</span>
@@ -1718,8 +1722,8 @@ export default function Index({
                                 <div className="space-y-3">
                                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Nominal Cepat</p>
                                     <div className="grid grid-cols-4 gap-1.5">
-                                        {[10000, 20000, 50000, 100000, Math.ceil(payable / 50000) * 50000]
-                                            .filter((v, i, a) => a.indexOf(v) === i && v > 0).slice(0, 4)
+                                        {[payable, Math.ceil(payable / 10000) * 10000, Math.ceil(payable / 50000) * 50000, Math.ceil(payable / 100000) * 100000]
+                                            .filter((v, i, a) => a.indexOf(v) === i && v >= payable).slice(0, 4)
                                             .map(amt => (
                                                 <button key={amt} onClick={() => setCashInput(String(amt))}
                                                     className={`py-2 rounded-xl text-xs font-bold transition-all ${

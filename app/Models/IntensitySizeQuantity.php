@@ -5,10 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class IntensitySizeQuantity extends Model
 {
     use HasUuids;
+
+    protected $table = 'intensity_size_quantities';
 
     protected $fillable = [
         'intensity_id',
@@ -51,13 +54,45 @@ class IntensitySizeQuantity extends Model
             ->first();
     }
 
+    /**
+     * Bulk insert dengan UUID yang di-generate manual.
+     * Menggunakan insert() agar 1 query, tapi tetap aman karena
+     * HasUuids::creating() tidak dipanggil saat bulk insert.
+     *
+     * @param  array<int, array{
+     *     intensity_id: string,
+     *     size_id: string,
+     *     oil_quantity: int,
+     *     alcohol_quantity: int,
+     *     total_volume: int,
+     *     is_active?: bool,
+     *     notes?: string|null,
+     * }> $rows
+     */
+    public static function bulkInsert(array $rows): void
+    {
+        if (empty($rows)) return;
+
+        $now = now();
+
+        $prepared = array_map(fn (array $row) => array_merge([
+            'id'               => (string) Str::uuid(),
+            'other_quantity'   => 0,
+            'notes'            => null,
+            'is_active'        => true,
+            'created_at'       => $now,
+            'updated_at'       => $now,
+        ], $row), $rows);
+
+        static::insert($prepared);
+    }
+
     // ─── Accessors / Helpers ──────────────────────────────────────────────────
 
     /**
      * Ambil target quantity berdasarkan ingredient_type.
      *
      * @param  string $type  'oil' | 'alcohol' | 'other'
-     * @return int
      */
     public function getTargetByType(string $type): int
     {
@@ -80,10 +115,6 @@ class IntensitySizeQuantity extends Model
 
     /**
      * @deprecated Gunakan VariantRecipe::scaleCollection() untuk scaling akurat.
-     *
-     * Metode ini masih tersedia untuk kompatibilitas backward namun
-     * tidak menggunakan ingredient_type sehingga kurang akurat jika
-     * ingredient lebih dari 2 (oil & alcohol).
      */
     public function scaleQuantity(float $baseQty, float $baseTotalVolume): int
     {

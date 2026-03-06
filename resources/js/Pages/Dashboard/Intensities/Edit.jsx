@@ -12,19 +12,19 @@ export default function Edit({ intensity, sizes, size_quantities }) {
                 <div className="mb-6">
                     <Link
                         href={route("intensities.index")}
-                        className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors mb-4"
+                        className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-teal-600 dark:text-slate-400 dark:hover:text-teal-400 transition-colors mb-4"
                     >
-                        <IconArrowLeft size={18} strokeWidth={2} />
+                        <IconArrowLeft size={17} strokeWidth={2} />
                         Kembali ke daftar intensitas
                     </Link>
                     <div className="flex items-center justify-between">
                         <div>
                             <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Edit Level Intensitas</h1>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                Perbarui kekuatan aroma dan volume per ukuran botol
+                                Perbarui perbandingan bibit : alkohol dan volume per ukuran botol
                             </p>
                         </div>
-                        <span className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-mono font-medium text-slate-700 dark:text-slate-300">
+                        <span className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-900/30 text-xs font-mono font-bold text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
                             {intensity.code}
                         </span>
                     </div>
@@ -35,7 +35,6 @@ export default function Edit({ intensity, sizes, size_quantities }) {
                     intensity={intensity}
                     sizes={sizes}
                     sizeQuantities={size_quantities}
-                    routeName="intensities.update"
                 />
             </div>
         </>

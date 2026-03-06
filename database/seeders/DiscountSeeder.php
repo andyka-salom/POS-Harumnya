@@ -13,11 +13,11 @@ use Illuminate\Support\Str;
  *
  *   1. PLINKO (game_reward)
  *      Syarat : beli >= 2 pcs P50 (semua intensitas & varian)
- *      Reward : spin Plinko -> 1 dari 4 hadiah
+ *      Reward : spin Plinko → 1 dari 4 hadiah
  *
  *   2. BUY 1 GET 1 (buy_x_get_y)
  *      Syarat : beli 1 P50 EDP atau EXT (any variant)
- *      Reward : gratis 1 P50 EDT — varian ditentukan sistem (ws)
+ *      Reward : gratis 1 P50 EDT — varian ditentukan sistem
  *
  *   3. BUY 4 GET 1 (buy_x_get_y)
  *      Syarat : beli 4 P50 semua kategori & varian
@@ -27,6 +27,15 @@ use Illuminate\Support\Str;
  *      Syarat : beli 1 P50 EDP atau EXT (any variant)
  *      Reward : gratis 2 P30 EDT (travel size) — varian ditentukan sistem
  * ===============================================================
+ *
+ * Disesuaikan dengan migration 008:
+ *   - discount_types: tambah start_time, end_time (nullable TIME)
+ *   - discount_types: priority = unsignedTinyInteger (max 255, nilai 10-20 aman)
+ *   - discount_types: value = decimal default 0, BUKAN nullable
+ *   - discount_stores: unique(discount_type_id, store_id) — PostgreSQL
+ *     menganggap NULL != NULL sehingga multiple NULL store_id boleh
+ *   - discount_applicabilities FK: cascadeOnDelete (bukan nullOnDelete)
+ *   - discount_requirements FK: cascadeOnDelete
  */
 class DiscountSeeder extends Seeder
 {
@@ -34,6 +43,7 @@ class DiscountSeeder extends Seeder
     {
         $now = now();
 
+        // ── Guard: pastikan master data sudah ada ─────────────────────────────
         $size50 = DB::table('sizes')->where('volume_ml', 50)->first();
         $size30 = DB::table('sizes')->where('volume_ml', 30)->first();
         $intEDT = DB::table('intensities')->where('code', 'EDT')->first();
@@ -41,7 +51,10 @@ class DiscountSeeder extends Seeder
         $intEXT = DB::table('intensities')->where('code', 'EXT')->first();
 
         if (! $size50 || ! $size30 || ! $intEDT || ! $intEDP || ! $intEXT) {
-            $this->command->error('Master data sizes/intensities belum ada. Jalankan IntensitySeeder terlebih dahulu.');
+            $this->command->error(
+                'Master data sizes/intensities belum ada. ' .
+                'Jalankan IntensitySeeder terlebih dahulu.'
+            );
             return;
         }
 
@@ -50,6 +63,16 @@ class DiscountSeeder extends Seeder
         $edt = $intEDT->id;
         $edp = $intEDP->id;
         $ext = $intEXT->id;
+
+        // ── Guard: skip jika sudah di-seed ────────────────────────────────────
+        $existing = DB::table('discount_types')
+            ->whereIn('code', ['PLINKO-P50', 'B1G1-P50-INTENSE', 'B4G1-P50-ALL', 'B1G3-P50-TRAVEL'])
+            ->count();
+
+        if ($existing > 0) {
+            $this->command->warn('DiscountSeeder: data sudah ada, skip.');
+            return;
+        }
 
         DB::beginTransaction();
 
@@ -65,6 +88,7 @@ class DiscountSeeder extends Seeder
                 'code'                  => 'PLINKO-P50',
                 'name'                  => 'Plinko Spin — Beli 2 P50',
                 'type'                  => 'game_reward',
+                // migration: value decimal default 0, NOT nullable
                 'value'                 => 0.00,
                 'buy_quantity'          => 2,
                 'get_quantity'          => 1,
@@ -74,8 +98,12 @@ class DiscountSeeder extends Seeder
                 'max_discount_amount'   => null,
                 'start_date'            => null,
                 'end_date'              => null,
+                // migration baru: start_time / end_time (TIME, nullable)
+                'start_time'            => null,
+                'end_time'              => null,
                 'is_game_reward'        => true,
                 'game_probability'      => 100,
+                // unsignedTinyInteger max 255
                 'priority'              => 10,
                 'is_combinable'         => false,
                 'is_active'             => true,
@@ -90,6 +118,7 @@ class DiscountSeeder extends Seeder
                 'updated_at'            => $now,
             ]);
 
+            // Applicability: P50 semua variant & intensity
             DB::table('discount_applicabilities')->insert([
                 'id'               => Str::uuid(),
                 'discount_type_id' => $dtPlinko,
@@ -100,6 +129,7 @@ class DiscountSeeder extends Seeder
                 'updated_at'       => $now,
             ]);
 
+            // Requirement: min 2 pcs P50 apapun
             DB::table('discount_requirements')->insert([
                 'id'                => Str::uuid(),
                 'discount_type_id'  => $dtPlinko,
@@ -113,6 +143,7 @@ class DiscountSeeder extends Seeder
                 'updated_at'        => $now,
             ]);
 
+            // Reward: 1x pool item (is_pool = true)
             $rwPlinko = Str::uuid()->toString();
             DB::table('discount_rewards')->insert([
                 'id'                  => $rwPlinko,
@@ -131,6 +162,7 @@ class DiscountSeeder extends Seeder
                 'updated_at'          => $now,
             ]);
 
+            // Pool items (equal probability 25 each)
             $plinkoItems = [
                 ['label' => 'Travel Size Parfum 10ml', 'probability' => 25, 'sort_order' => 1],
                 ['label' => 'Atomizer Portable',        'probability' => 25, 'sort_order' => 2],
@@ -148,6 +180,7 @@ class DiscountSeeder extends Seeder
                     'size_id'            => null,
                     'label'              => $item['label'],
                     'image_url'          => null,
+                    // migration: fixed_price nullable decimal(15,2)
                     'fixed_price'        => 0.00,
                     'probability'        => $item['probability'],
                     'is_active'          => true,
@@ -157,7 +190,7 @@ class DiscountSeeder extends Seeder
                 ]);
             }
 
-            $this->command->info('[1/4] Plinko seeded');
+            $this->command->line('  [1/4] Plinko seeded');
 
             // ==================================================================
             // 2. BUY 1 GET 1
@@ -178,6 +211,8 @@ class DiscountSeeder extends Seeder
                 'max_discount_amount'   => null,
                 'start_date'            => null,
                 'end_date'              => null,
+                'start_time'            => null,
+                'end_time'              => null,
                 'is_game_reward'        => false,
                 'game_probability'      => null,
                 'priority'              => 20,
@@ -194,6 +229,8 @@ class DiscountSeeder extends Seeder
                 'updated_at'            => $now,
             ]);
 
+            // Applicabilities & Requirements: EDP OR EXT, P50
+            // group_key sama → dievaluasi OR di level aplikasi
             foreach ([$edp, $ext] as $intId) {
                 DB::table('discount_applicabilities')->insert([
                     'id'               => Str::uuid(),
@@ -204,6 +241,7 @@ class DiscountSeeder extends Seeder
                     'created_at'       => $now,
                     'updated_at'       => $now,
                 ]);
+
                 DB::table('discount_requirements')->insert([
                     'id'                => Str::uuid(),
                     'discount_type_id'  => $dtB1G1,
@@ -218,9 +256,9 @@ class DiscountSeeder extends Seeder
                 ]);
             }
 
-            $rwB1G1 = Str::uuid()->toString();
+            // Reward: 1x P50 EDT (intensity spesifik, variant null = ws)
             DB::table('discount_rewards')->insert([
-                'id'                  => $rwB1G1,
+                'id'                  => Str::uuid(),
                 'discount_type_id'    => $dtB1G1,
                 'variant_id'          => null,
                 'intensity_id'        => $edt,
@@ -236,7 +274,7 @@ class DiscountSeeder extends Seeder
                 'updated_at'          => $now,
             ]);
 
-            $this->command->info('[2/4] Buy 1 Get 1 seeded');
+            $this->command->line('  [2/4] Buy 1 Get 1 seeded');
 
             // ==================================================================
             // 3. BUY 4 GET 1
@@ -257,6 +295,8 @@ class DiscountSeeder extends Seeder
                 'max_discount_amount'   => null,
                 'start_date'            => null,
                 'end_date'              => null,
+                'start_time'            => null,
+                'end_time'              => null,
                 'is_game_reward'        => false,
                 'game_probability'      => null,
                 'priority'              => 15,
@@ -296,9 +336,8 @@ class DiscountSeeder extends Seeder
                 'updated_at'        => $now,
             ]);
 
-            $rwB4G1 = Str::uuid()->toString();
             DB::table('discount_rewards')->insert([
-                'id'                  => $rwB4G1,
+                'id'                  => Str::uuid(),
                 'discount_type_id'    => $dtB4G1,
                 'variant_id'          => null,
                 'intensity_id'        => $edt,
@@ -314,12 +353,12 @@ class DiscountSeeder extends Seeder
                 'updated_at'          => $now,
             ]);
 
-            $this->command->info('[3/4] Buy 4 Get 1 seeded');
+            $this->command->line('  [3/4] Buy 4 Get 1 seeded');
 
             // ==================================================================
             // 4. BUY 1 GET 3
-            //    buy_quantity=1, get_quantity=2 pcs P30
-            //    "Get 3" = total 3 botol yang didapat (1 beli + 2 gratis P30)
+            //    get_quantity = 2 (2 botol P30 gratis)
+            //    "Get 3" = total diterima 3 botol (1 P50 beli + 2 P30 gratis)
             // ==================================================================
             $dtB1G3 = Str::uuid()->toString();
 
@@ -337,6 +376,8 @@ class DiscountSeeder extends Seeder
                 'max_discount_amount'   => null,
                 'start_date'            => null,
                 'end_date'              => null,
+                'start_time'            => null,
+                'end_time'              => null,
                 'is_game_reward'        => false,
                 'game_probability'      => null,
                 'priority'              => 18,
@@ -364,6 +405,7 @@ class DiscountSeeder extends Seeder
                     'created_at'       => $now,
                     'updated_at'       => $now,
                 ]);
+
                 DB::table('discount_requirements')->insert([
                     'id'                => Str::uuid(),
                     'discount_type_id'  => $dtB1G3,
@@ -378,9 +420,9 @@ class DiscountSeeder extends Seeder
                 ]);
             }
 
-            $rwB1G3 = Str::uuid()->toString();
+            // Reward: 2x P30 EDT
             DB::table('discount_rewards')->insert([
-                'id'                  => $rwB1G3,
+                'id'                  => Str::uuid(),
                 'discount_type_id'    => $dtB1G3,
                 'variant_id'          => null,
                 'intensity_id'        => $edt,
@@ -396,10 +438,14 @@ class DiscountSeeder extends Seeder
                 'updated_at'          => $now,
             ]);
 
-            $this->command->info('[4/4] Buy 1 Get 3 seeded');
+            $this->command->line('  [4/4] Buy 1 Get 3 seeded');
 
             // ==================================================================
-            // DISCOUNT STORES: berlaku di semua toko (store_id null)
+            // DISCOUNT STORES
+            // store_id = null → berlaku di semua toko
+            // uq_discount_store adalah UNIQUE(discount_type_id, store_id).
+            // Di PostgreSQL NULL != NULL, sehingga multiple NULL rows diperbolehkan
+            // pada satu discount_type_id yang berbeda.
             // ==================================================================
             foreach ([$dtPlinko, $dtB1G1, $dtB4G1, $dtB1G3] as $dtId) {
                 DB::table('discount_stores')->insert([
@@ -414,7 +460,7 @@ class DiscountSeeder extends Seeder
             DB::commit();
 
             $this->command->info('');
-            $this->command->info('All 4 discount programs seeded successfully!');
+            $this->command->info('✓ DiscountSeeder selesai — 4 program promo berhasil di-seed.');
 
         } catch (\Exception $e) {
             DB::rollBack();

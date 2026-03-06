@@ -50,15 +50,41 @@ return new class extends Migration
             $table->boolean('is_available_as_addon')->default(true)
                   ->comment('Tampil di tab Kemasan POS sebagai pilihan add-on');
 
-            // ★ PERUBAHAN: decimal(15,2) → support Rp 1.500,50
+            // ★ decimal(15,2) → support Rp 1.500,50
             $table->decimal('purchase_price', 15, 2)->default(0)
                   ->comment('Harga beli standar per unit (rupiah, 2 desimal)');
+
             $table->decimal('selling_price', 15, 2)->default(0)
-                  ->comment('Harga jual saat dijual sebagai add-on (rupiah, 2 desimal)');
+                  ->comment('Harga jual saat dijual sebagai add-on; diabaikan jika is_free = true');
+
+            /*
+            |----------------------------------------------------------------------
+            | FREE PACKAGING — Opsi B
+            |----------------------------------------------------------------------
+            | is_free          → true  : packaging selalu gratis ke customer
+            |                    false : gunakan selling_price seperti biasa
+            |
+            | free_condition_note → catatan human-readable mengapa gratis,
+            |                       misal: "Gratis untuk setiap pembelian"
+            |                       Tidak dipakai sebagai logic; murni informatif.
+            |
+            | Catatan biaya:
+            |   Meskipun is_free = true, average_cost TETAP dihitung.
+            |   Hal ini memastikan laporan HPP / COGS tetap akurat.
+            |
+            | Contoh penggunaan di application layer:
+            |   $finalPrice = $packaging->is_free ? 0 : $packaging->selling_price;
+            |----------------------------------------------------------------------
+            */
+            $table->boolean('is_free')->default(false)
+                  ->comment('True = gratis ke customer; average_cost tetap dihitung untuk laporan HPP');
+
+            $table->string('free_condition_note', 255)->nullable()
+                  ->comment('Catatan kondisi gratis, misal: Gratis untuk setiap pembelian. Bersifat informatif, bukan logic.');
 
             // decimal(15,4) → WAC presisi tinggi
             $table->decimal('average_cost', 15, 4)->default(0)
-                  ->comment('Weighted Average Cost per unit');
+                  ->comment('Weighted Average Cost per unit; tetap dihitung meski is_free = true');
 
             $table->boolean('is_active')->default(true);
             $table->integer('sort_order')->default(0);
@@ -74,6 +100,8 @@ return new class extends Migration
             $table->index(['code', 'is_active']);
             $table->index(['is_active', 'is_available_as_addon', 'sort_order'],
                           'idx_pkg_active_addon_sort');
+            $table->index(['is_free', 'is_active'],
+                          'idx_pkg_free_active');
         });
     }
 

@@ -39,7 +39,6 @@ class TransactionController extends Controller
     // =========================================================================
     // INDEX — Halaman utama POS
     // GET /dashboard/transactions
-    // Route name: transactions.index
     // =========================================================================
 
     public function index(): Response
@@ -53,7 +52,7 @@ class TransactionController extends Controller
                 'carts'              => [],
                 'carts_total'        => 0,
                 'heldCarts'          => [],
-                'variants'           => [],
+                'intensities'        => [],
                 'customers'          => [],
                 'salesPeople'        => [],
                 'packagingMaterials' => [],
@@ -66,12 +65,16 @@ class TransactionController extends Controller
 
         $store = Store::with('storeCategory')->find($storeId);
 
-        // Cart aktif kasir ini (hold_id IS NULL)
         $carts      = $this->getActiveCarts($user->id, $storeId);
         $cartsTotal = $this->calcCartsTotal($carts);
         $heldCarts  = $this->getHeldCarts($user->id, $storeId);
 
-        // Customers — load initial 100, live search via filteredCustomers di frontend
+        // ── PERUBAHAN: Load intensities di index, bukan variants ─────────────
+        // Alur baru: Intensity → Variant → Size
+        $intensities = Intensity::where('is_active', true)
+            ->orderBy('sort_order')
+            ->get(['id', 'name', 'code', 'oil_ratio', 'alcohol_ratio', 'sort_order']);
+
         $customers = Customer::select('id', 'name', 'phone', 'code', 'tier', 'points')
             ->where('is_active', true)
             ->orderBy('name')
@@ -83,24 +86,30 @@ class TransactionController extends Controller
             ->orderBy('name')
             ->get();
 
-        $packagingMaterials = PackagingMaterial::select('id', 'name', 'code', 'selling_price')
+        // ── Packaging: sertakan is_free ────────────────────────────────────
+        $packagingMaterials = PackagingMaterial::select(
+                'id', 'name', 'code', 'selling_price', 'is_free',
+                'free_condition_note', 'average_cost', 'sort_order'
+            )
             ->where('is_active', true)
+            ->where('is_available_as_addon', true)
             ->orderBy('sort_order')
             ->get();
 
-        $paymentMethods = PaymentMethod::select('id', 'name', 'code', 'type', 'admin_fee_pct', 'can_give_change')
+        $paymentMethods = PaymentMethod::select(
+                'id', 'name', 'code', 'type', 'admin_fee_pct', 'can_give_change'
+            )
             ->where('is_active', true)
             ->orderBy('sort_order')
             ->get();
 
         $discounts = $this->getActiveDiscountsForStore($storeId);
-        $variants  = $this->getVariantsForStore($store);
 
         return Inertia::render('Dashboard/Transactions/Index', [
             'carts'              => $carts,
             'carts_total'        => $cartsTotal,
             'heldCarts'          => $heldCarts,
-            'variants'           => $variants,
+            'intensities'        => $intensities,   // ← sebelumnya 'variants'
             'customers'          => $customers,
             'salesPeople'        => $salesPeople,
             'packagingMaterials' => $packagingMaterials,
@@ -115,7 +124,6 @@ class TransactionController extends Controller
     // =========================================================================
     // HISTORY — Riwayat transaksi
     // GET /dashboard/transactions/history
-    // Route name: transactions.history
     // =========================================================================
 
     public function history(Request $request): Response
@@ -123,22 +131,40 @@ class TransactionController extends Controller
         $user    = Auth::user();
         $storeId = $user->default_store_id;
 
-        $query = Sale::with(['items', 'payments', 'discounts'])
+        $query = Sale::with([
+                'items',
+                'payments.paymentMethod',
+                'customer:id,name,phone',
+                'cashier:id,name',
+                'salesPerson:id,name,code',
+            ])
+            ->withCount('items')
             ->where('store_id', $storeId)
             ->latest('sold_at');
 
-        // Filter tanggal
+        // ── Filter tanggal — gunakan sold_at (bukan sale_date) ──────────────
         if ($request->filled('date_from')) {
             $query->whereDate('sold_at', '>=', $request->date_from);
         }
         if ($request->filled('date_to')) {
             $query->whereDate('sold_at', '<=', $request->date_to);
         }
-        // Filter cashier (jika bukan admin, hanya lihat transaksi sendiri)
+
+        // ── Filter status ────────────────────────────────────────────────────
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // ── Akses control ────────────────────────────────────────────────────
         if (! $user->hasRole('super-admin') && ! $user->hasPermissionTo('transactions-all')) {
             $query->where('cashier_id', $user->id);
         }
-        // Filter search (sale_number atau nama customer)
+
+        // ── Search: sale_number atau customer_name (snapshot) ────────────────
+        if ($request->filled('sale_number')) {
+            $q = $request->sale_number;
+            $query->where('sale_number', 'like', "%{$q}%");
+        }
         if ($request->filled('q')) {
             $q = $request->q;
             $query->where(fn ($inner) =>
@@ -149,111 +175,122 @@ class TransactionController extends Controller
 
         $sales = $query->paginate(20)->withQueryString();
 
+        // ── Summary stats untuk filter yang aktif ───────────────────────────
+        $summaryQuery = Sale::where('store_id', $storeId)
+            ->where('status', 'completed');
+
+        if ($request->filled('date_from')) {
+            $summaryQuery->whereDate('sold_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $summaryQuery->whereDate('sold_at', '<=', $request->date_to);
+        }
+        if (! $user->hasRole('super-admin') && ! $user->hasPermissionTo('transactions-all')) {
+            $summaryQuery->where('cashier_id', $user->id);
+        }
+
+        $summary = $summaryQuery->selectRaw('
+            COUNT(*) as total_transactions,
+            COALESCE(SUM(total), 0) as total_revenue,
+            COALESCE(SUM(cogs_total), 0) as total_cogs,
+            COALESCE(SUM(gross_profit), 0) as total_gross_profit,
+            COALESCE(AVG(gross_margin_pct), 0) as avg_margin
+        ')->first();
+
         return Inertia::render('Dashboard/Transactions/History', [
-            'sales'  => $sales,
-            'filters' => $request->only('date_from', 'date_to', 'q'),
+            'sales'   => $sales,
+            'filters' => $request->only('date_from', 'date_to', 'q', 'sale_number', 'status'),
+            'summary' => $summary,
         ]);
     }
 
     // =========================================================================
     // PRINT — Struk/receipt penjualan
     // GET /dashboard/transactions/print/{saleNumber}
-    // Route name: transactions.print
     // =========================================================================
 
-    public function print(string $saleNumber): Response
+    public function print(string $saleNumber, Request $request): Response
     {
         $sale = Sale::with([
-                'items.packagings',
+                'items.packagings.packagingMaterial',
                 'payments.paymentMethod',
-                'discounts',
                 'store',
-                'cashier',
-                'salesPerson',
-                'customer',
+                'cashier:id,name',
+                'salesPerson:id,name',
+                'customer:id,name,phone,code',
             ])
-            ->where('sale_number', $saleNumber)
+            ->where('sale_number', str_replace('-', '/', $saleNumber))
+            ->orWhere('sale_number', $saleNumber)
             ->firstOrFail();
 
         return Inertia::render('Dashboard/Transactions/Print', [
-            'sale' => $sale,
+            'sale'            => $sale,
+            // fromTransaction = true saat redirect dari checkout (bukan akses langsung)
+            'fromTransaction' => session()->pull('from_transaction', false),
         ]);
     }
 
     // =========================================================================
-    // GET AVAILABLE INTENSITIES — Step 2: setelah variant dipilih
-    // GET /dashboard/transactions/get-intensities?variant_id=X
-    // Route name: transactions.get-intensities
+    // GET VARIANTS FOR INTENSITY — ALUR BARU: Step 2 (setelah intensity dipilih)
+    // GET /dashboard/transactions/get-variants?intensity_id=X
+    // Route name: transactions.get-variants
     //
-    // Strategi: coba dari products dulu, fallback ke intensity_size_prices,
-    // fallback terakhir semua intensities aktif (jika sistem masih setup awal).
+    // Kembalikan variant yang punya minimal 1 harga aktif untuk intensity ini.
+    // Filter store whitelist juga diterapkan.
     // =========================================================================
 
-    // =========================================================================
-    // GET AVAILABLE INTENSITIES
-    // GET /dashboard/transactions/get-intensities?variant_id=X
-    // Route name: transactions.get-intensities
-    //
-    // Sumber kebenaran: intensity_size_prices
-    // Intensitas yang valid = yang punya minimal 1 harga aktif di intensity_size_prices.
-    // Ini benar untuk SEMUA varian (ada produk maupun belum).
-    // =========================================================================
-
-    public function getAvailableIntensities(Request $request): JsonResponse
+    public function getVariantsForIntensity(Request $request): JsonResponse
     {
-        $request->validate(['variant_id' => 'required|uuid|exists:variants,id']);
+        $request->validate(['intensity_id' => 'required|uuid|exists:intensities,id']);
 
-        // Intensitas yang punya harga di intensity_size_prices (aktif)
-        $intensityIds = IntensitySizePrice::where('is_active', true)
-            ->pluck('intensity_id')
-            ->unique();
+        $user    = Auth::user();
+        $storeId = $user->default_store_id;
+        $store   = $storeId ? Store::with('storeCategory')->find($storeId) : null;
 
-        if ($intensityIds->isEmpty()) {
-            // Fallback: semua intensitas aktif (admin belum setup harga sama sekali)
-            $intensities = Intensity::where('is_active', true)
-                ->orderBy('sort_order')
-                ->get(['id', 'name', 'code', 'oil_ratio', 'alcohol_ratio', 'concentration_percentage', 'sort_order']);
-        } else {
-            $intensities = Intensity::whereIn('id', $intensityIds)
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->get(['id', 'name', 'code', 'oil_ratio', 'alcohol_ratio', 'concentration_percentage', 'sort_order']);
+        // Variant yang punya harga untuk intensity ini (via products atau langsung)
+        // Cukup semua variant aktif — harga dicek di step get-sizes
+        $variantQuery = Variant::where('is_active', true)->orderBy('sort_order');
+
+        // Store whitelist filter
+        if ($store && $store->store_category_id) {
+            $category = $store->storeCategory;
+            if ($category && ! $category->allow_all_variants) {
+                $allowedIds = $category->variants()
+                    ->wherePivot('is_active', true)
+                    ->pluck('variants.id');
+
+                if ($allowedIds->isNotEmpty()) {
+                    $variantQuery->whereIn('id', $allowedIds);
+                }
+            }
         }
+
+        $variants = $variantQuery->get(['id', 'name', 'code', 'gender', 'image']);
 
         return response()->json([
             'success' => true,
-            'data'    => $intensities,
+            'data'    => $variants,
         ]);
     }
 
     // =========================================================================
-    // GET AVAILABLE SIZES
-    // GET /dashboard/transactions/get-sizes?variant_id=X&intensity_id=Y
-    // Route name: transactions.get-sizes
-    //
-    // Sumber kebenaran: intensity_size_prices
-    // Size valid = yang punya harga aktif di intensity_size_prices untuk intensity ini.
-    // Ini konsisten untuk SEMUA varian.
+    // GET AVAILABLE SIZES — Step 3 (setelah variant dipilih)
+    // GET /dashboard/transactions/get-sizes?intensity_id=X&variant_id=Y
     // =========================================================================
 
     public function getAvailableSizes(Request $request): JsonResponse
     {
         $request->validate([
-            'variant_id'   => 'required|uuid|exists:variants,id',
             'intensity_id' => 'required|uuid|exists:intensities,id',
+            'variant_id'   => 'required|uuid|exists:variants,id',
         ]);
 
-        // Ambil semua size_id yang punya harga untuk intensity ini
         $priceRows = IntensitySizePrice::where('intensity_id', $request->intensity_id)
             ->where('is_active', true)
             ->get(['size_id', 'price']);
 
         if ($priceRows->isEmpty()) {
-            // Tidak ada harga untuk intensity ini sama sekali
-            return response()->json([
-                'success' => true,
-                'data'    => [],
-            ]);
+            return response()->json(['success' => true, 'data' => []]);
         }
 
         $priceMap = $priceRows->pluck('price', 'size_id');
@@ -267,51 +304,40 @@ class TransactionController extends Controller
                 return $size;
             });
 
-        return response()->json([
-            'success' => true,
-            'data'    => $sizes,
-        ]);
+        return response()->json(['success' => true, 'data' => $sizes]);
     }
 
     // =========================================================================
-    // GET PERFUME PRICE — Dipanggil saat builder bar muncul (+ packaging opsional)
+    // GET PERFUME PRICE
     // POST /dashboard/transactions/get-perfume-price
-    // Route name: transactions.get-perfume-price
-    // Body: variant_id, intensity_id, size_id, packaging_ids[]
-    //
-    // PENTING: Sistem made-to-order — products table mungkin kosong.
-    // Harga UTAMA dari intensity_size_prices. Product hanya opsional (nama/SKU).
+    // Sertakan packaging gratis (is_free=true) → effective_price = 0
     // =========================================================================
 
     public function getPerfumePrice(Request $request): JsonResponse
     {
         $request->validate([
-            'variant_id'      => 'required|uuid|exists:variants,id',
             'intensity_id'    => 'required|uuid|exists:intensities,id',
+            'variant_id'      => 'required|uuid|exists:variants,id',
             'size_id'         => 'required|uuid|exists:sizes,id',
             'packaging_ids'   => 'nullable|array',
             'packaging_ids.*' => 'uuid|exists:packaging_materials,id',
         ]);
 
-        // ── 1. Harga dari intensity_size_prices (sumber kebenaran utama) ───────
         $perfumePrice = IntensitySizePrice::where('intensity_id', $request->intensity_id)
             ->where('size_id', $request->size_id)
             ->where('is_active', true)
             ->value('price');
 
-        // ── 2. Product opsional (untuk nama & SKU, bukan penentu harga) ────────
         $product = Product::where('variant_id', $request->variant_id)
             ->where('intensity_id', $request->intensity_id)
             ->where('size_id', $request->size_id)
             ->where('is_active', true)
             ->first();
 
-        // ── 3. Fallback harga ke products.selling_price jika isp belum di-set ──
         if ($perfumePrice === null && $product !== null) {
             $perfumePrice = $product->selling_price;
         }
 
-        // ── 4. Tidak ada harga sama sekali → admin belum setup ─────────────────
         if ($perfumePrice === null) {
             return response()->json([
                 'success' => false,
@@ -319,20 +345,26 @@ class TransactionController extends Controller
             ], 422);
         }
 
-        // ── 5. Hitung packaging ────────────────────────────────────────────────
+        // ── Packaging: hitung effective_price (0 jika is_free) ───────────────
         $packagingTotal   = 0;
         $packagingDetails = [];
 
         if ($request->filled('packaging_ids')) {
             PackagingMaterial::whereIn('id', $request->packaging_ids)
                 ->where('is_active', true)
-                ->get(['id', 'name', 'selling_price'])
+                ->get(['id', 'name', 'selling_price', 'is_free',
+                       'free_condition_note', 'average_cost'])
                 ->each(function ($pkg) use (&$packagingTotal, &$packagingDetails) {
-                    $packagingTotal    += (int) ($pkg->selling_price ?? 0);
+                    $effectivePrice = $pkg->is_free ? 0 : (int) ($pkg->selling_price ?? 0);
+                    $packagingTotal += $effectivePrice;
                     $packagingDetails[] = [
-                        'id'    => $pkg->id,
-                        'name'  => $pkg->name,
-                        'price' => $pkg->selling_price,
+                        'id'              => $pkg->id,
+                        'name'            => $pkg->name,
+                        'price'           => $pkg->selling_price,   // harga asli
+                        'effective_price' => $effectivePrice,        // 0 jika gratis
+                        'is_free'         => $pkg->is_free,
+                        'free_note'       => $pkg->free_condition_note,
+                        'average_cost'    => $pkg->average_cost,     // untuk HPP
                     ];
                 });
         }
@@ -355,15 +387,13 @@ class TransactionController extends Controller
     // =========================================================================
     // ADD TO CART
     // POST /dashboard/transactions/add-to-cart
-    // Route name: transactions.add-to-cart
-    // Mendukung packaging_ids[] multi-select (attached ke cart item)
     // =========================================================================
 
     public function addToCart(Request $request): RedirectResponse
     {
         $request->validate([
-            'variant_id'      => 'required|uuid|exists:variants,id',
             'intensity_id'    => 'required|uuid|exists:intensities,id',
+            'variant_id'      => 'required|uuid|exists:variants,id',
             'size_id'         => 'required|uuid|exists:sizes,id',
             'qty'             => 'required|integer|min:1|max:99',
             'packaging_ids'   => 'nullable|array',
@@ -375,15 +405,12 @@ class TransactionController extends Controller
 
         abort_unless($storeId, 422, 'Toko default tidak ditemukan. Hubungi admin.');
 
-        // Product opsional (made-to-order: mungkin belum di-generate dari recipe)
         $product = Product::where('variant_id', $request->variant_id)
             ->where('intensity_id', $request->intensity_id)
             ->where('size_id', $request->size_id)
             ->where('is_active', true)
             ->first();
 
-        // Harga: intensity_size_prices (utama) → products.selling_price → 0
-        // Cast ke (int) karena PostgreSQL kolom bigint tidak terima decimal string seperti "85000.00"
         $price = (int) (IntensitySizePrice::where('intensity_id', $request->intensity_id)
             ->where('size_id', $request->size_id)
             ->where('is_active', true)
@@ -403,17 +430,18 @@ class TransactionController extends Controller
                 'qty'          => $request->qty,
             ]);
 
-            // Packaging add-ons yang melekat ke cart item ini
             if ($request->filled('packaging_ids')) {
                 PackagingMaterial::whereIn('id', $request->packaging_ids)
                     ->where('is_active', true)
                     ->get()
                     ->each(function ($pkg) use ($cart) {
+                        // effective_price: 0 jika is_free, jika tidak pakai selling_price
+                        $effectivePrice = $pkg->is_free ? 0 : (int) ($pkg->selling_price ?? 0);
                         CartPackaging::create([
                             'cart_id'               => $cart->id,
                             'packaging_material_id' => $pkg->id,
                             'qty'                   => 1,
-                            'unit_price'            => (int) ($pkg->selling_price ?? 0),
+                            'unit_price'            => $effectivePrice,
                         ]);
                     });
             }
@@ -425,7 +453,6 @@ class TransactionController extends Controller
     // =========================================================================
     // UPDATE QTY CART ITEM
     // PATCH /dashboard/transactions/cart/{id}
-    // Route name: transactions.update-cart
     // =========================================================================
 
     public function updateCart(Request $request, string $id): RedirectResponse
@@ -443,7 +470,6 @@ class TransactionController extends Controller
     // =========================================================================
     // HAPUS CART ITEM
     // DELETE /dashboard/transactions/cart/{id}
-    // Route name: transactions.destroy-cart
     // =========================================================================
 
     public function destroyCart(string $id): RedirectResponse
@@ -456,9 +482,7 @@ class TransactionController extends Controller
     }
 
     // =========================================================================
-    // HOLD CART (Parkir transaksi)
-    // POST /dashboard/transactions/hold
-    // Route name: transactions.hold
+    // HOLD CART
     // =========================================================================
 
     public function holdCart(Request $request): RedirectResponse
@@ -481,9 +505,6 @@ class TransactionController extends Controller
 
     // =========================================================================
     // RESUME HELD CART
-    // POST /dashboard/transactions/resume/{holdId}
-    // Route name: transactions.resume
-    // Jika ada cart aktif → di-hold dulu otomatis, lalu held cart diaktifkan.
     // =========================================================================
 
     public function resumeHeldCart(string $holdId): RedirectResponse
@@ -492,7 +513,6 @@ class TransactionController extends Controller
         $storeId = $user->default_store_id;
 
         DB::transaction(function () use ($user, $storeId, $holdId) {
-            // Parkir cart aktif saat ini terlebih dahulu (jika ada)
             if (Cart::where('cashier_id', $user->id)
                     ->where('store_id', $storeId)
                     ->whereNull('hold_id')
@@ -509,7 +529,6 @@ class TransactionController extends Controller
                     ]);
             }
 
-            // Aktifkan held cart yang dipilih
             Cart::where('cashier_id', $user->id)
                 ->where('store_id', $storeId)
                 ->where('hold_id', $holdId)
@@ -526,8 +545,6 @@ class TransactionController extends Controller
 
     // =========================================================================
     // HAPUS HELD CART
-    // DELETE /dashboard/transactions/held/{holdId}
-    // Route name: transactions.delete-held
     // =========================================================================
 
     public function deleteHeldCart(string $holdId): RedirectResponse
@@ -542,12 +559,11 @@ class TransactionController extends Controller
     // =========================================================================
     // CHECKOUT / STORE SALE
     // POST /dashboard/transactions/store
-    // Route name: transactions.store
     //
-    // Payload dari Index.jsx:
-    //   customer_id, sales_person_id, payment_method_id,
-    //   discount_type_id, discount_amount, cash_amount,
-    //   standalone_packagings[]{packaging_material_id, qty}
+    // Packaging gratis (is_free):
+    //   - unit_price di SaleItemPackaging = 0 (tidak menambah revenue)
+    //   - cogs_total tetap dihitung dari average_cost (masuk HPP)
+    //   - label 'GRATIS' disimpan di packaging_name
     // =========================================================================
 
     public function store(Request $request): RedirectResponse
@@ -567,7 +583,6 @@ class TransactionController extends Controller
         $user    = Auth::user();
         $storeId = $user->default_store_id;
 
-        // Load cart aktif dengan semua relasi
         $carts = Cart::with([
                 'packagings.packagingMaterial',
                 'product',
@@ -589,7 +604,6 @@ class TransactionController extends Controller
         $salesPerson   = $request->sales_person_id ? SalesPerson::find($request->sales_person_id) : null;
         $discountType  = $request->discount_type_id ? DiscountType::find($request->discount_type_id) : null;
 
-        // Resolve standalone packagings (tab Kemasan, tidak terikat ke cart item)
         $standalonePkgs = [];
         foreach ((array) $request->standalone_packagings as $sp) {
             $pkg = PackagingMaterial::find($sp['packaging_material_id'] ?? null);
@@ -598,11 +612,10 @@ class TransactionController extends Controller
             }
         }
 
-        DB::transaction(function () use (
+        $sale = DB::transaction(function () use (
             $carts, $standalonePkgs, $request, $user, $storeId,
             $paymentMethod, $customer, $salesPerson, $discountType
         ) {
-            // ── Hitung subtotals ───────────────────────────────────────────────
             [$subtotalPerfume, $subtotalPackaging, $cogsPerfume, $cogsPackaging]
                 = $this->calcSubtotals($carts, $standalonePkgs);
 
@@ -610,18 +623,15 @@ class TransactionController extends Controller
             $discountAmount = min((float) ($request->discount_amount ?? 0), $subtotal);
             $total          = max(0, $subtotal - $discountAmount);
 
-            // Perhitungan pembayaran
             $isCash     = $paymentMethod->can_give_change || $paymentMethod->type === 'cash';
             $amountPaid = $isCash ? (float) ($request->cash_amount ?? $total) : $total;
             $adminFee   = (int) round($amountPaid * ($paymentMethod->admin_fee_pct ?? 0) / 100);
             $change     = $isCash ? max(0, $amountPaid - $total) : 0;
 
-            // Profitabilitas
             $cogsTotal   = $cogsPerfume + $cogsPackaging;
             $grossProfit = $total - $cogsTotal;
             $marginPct   = $total > 0 ? round($grossProfit / $total * 100, 2) : 0;
 
-            // ── Buat Sale header ───────────────────────────────────────────────
             $sale = Sale::create([
                 'sale_number'        => $this->generateSaleNumber($storeId),
                 'store_id'           => $storeId,
@@ -650,7 +660,7 @@ class TransactionController extends Controller
                 'status'             => 'completed',
             ]);
 
-            // ── Sale Items dari cart ───────────────────────────────────────────
+            // ── Sale Items ─────────────────────────────────────────────────
             foreach ($carts as $cart) {
                 $itemSub    = $cart->unit_price * $cart->qty;
                 $itemCogs   = ($cart->product?->production_cost ?? 0) * $cart->qty;
@@ -675,29 +685,32 @@ class TransactionController extends Controller
                         ? round($itemProfit / $itemSub * 100, 2) : 0,
                 ]);
 
-                // Packaging attached ke item ini
                 foreach ($cart->packagings as $cartPkg) {
                     $this->createSaleItemPackaging($saleItem->id, $cartPkg);
                 }
             }
 
-            // ── Standalone packagings (tab Kemasan) sebagai SaleItem terpisah ──
+            // ── Standalone packagings ──────────────────────────────────────
             foreach ($standalonePkgs as $sp) {
-                $pkg    = $sp['pkg'];
-                $qty    = $sp['qty'];
-                $pkgSub  = (int) (($pkg->selling_price ?? 0) * $qty);
+                $pkg     = $sp['pkg'];
+                $qty     = $sp['qty'];
+                // Harga efektif: 0 jika gratis, else selling_price
+                $unitEffective = $pkg->is_free ? 0 : (int) ($pkg->selling_price ?? 0);
+                $pkgSub  = $unitEffective * $qty;
                 $pkgCogs = (int) (($pkg->average_cost ?? 0) * $qty);
+
+                $nameSuffix = $pkg->is_free ? ' [GRATIS]' : '';
 
                 SaleItem::create([
                     'sale_id'               => $sale->id,
                     'product_id'            => null,
-                    'product_name'          => '[Kemasan] ' . $pkg->name,
+                    'product_name'          => '[Kemasan] ' . $pkg->name . $nameSuffix,
                     'product_sku'           => $pkg->code,
                     'variant_name'          => null,
                     'intensity_code'        => null,
                     'size_ml'               => null,
                     'qty'                   => $qty,
-                    'unit_price'            => (int) ($pkg->selling_price ?? 0),
+                    'unit_price'            => $unitEffective,
                     'item_discount'         => 0,
                     'subtotal'              => $pkgSub,
                     'cogs_per_unit'         => $pkg->average_cost ?? 0,
@@ -705,11 +718,13 @@ class TransactionController extends Controller
                     'line_gross_profit'     => $pkgSub - $pkgCogs,
                     'line_gross_margin_pct' => $pkgSub > 0
                         ? round(($pkgSub - $pkgCogs) / $pkgSub * 100, 2) : 0,
-                    'notes'                 => 'Kemasan standalone',
+                    'notes'                 => $pkg->is_free
+                        ? 'Kemasan gratis: ' . ($pkg->free_condition_note ?? 'Gratis')
+                        : 'Kemasan standalone',
                 ]);
             }
 
-            // ── Sale Discount ──────────────────────────────────────────────────
+            // ── Sale Discount ──────────────────────────────────────────────
             if ($discountAmount > 0) {
                 SaleDiscount::create([
                     'sale_id'           => $sale->id,
@@ -726,13 +741,17 @@ class TransactionController extends Controller
                         'discount_type_id' => $discountType->id,
                         'user_id'          => $user->id,
                         'order_id'         => $sale->id,
+                        'store_id'         => $storeId,
+                        'discount_amount'  => (int) $discountAmount,
+                        'original_amount'  => (int) $subtotal,
+                        'final_amount'     => (int) $total,
                         'amount_saved'     => (int) $discountAmount,
                         'used_at'          => now(),
                     ]);
                 }
             }
 
-            // ── Sale Payment ───────────────────────────────────────────────────
+            // ── Sale Payment ───────────────────────────────────────────────
             SalePayment::create([
                 'sale_id'             => $sale->id,
                 'payment_method_id'   => $paymentMethod->id,
@@ -744,9 +763,9 @@ class TransactionController extends Controller
                 'settled_at'          => now(),
             ]);
 
-            // ── Loyalty Points ─────────────────────────────────────────────────
+            // ── Loyalty Points ─────────────────────────────────────────────
             if ($customer && $total > 0) {
-                $pointsEarned = (int) floor($total / 10000); // 1 poin per Rp10.000
+                $pointsEarned = (int) floor($total / 10000);
 
                 if ($pointsEarned > 0) {
                     $sale->update(['points_earned' => $pointsEarned]);
@@ -760,6 +779,7 @@ class TransactionController extends Controller
                         'customer_id'    => $customer->id,
                         'type'           => 'earned',
                         'points'         => $pointsEarned,
+                        'balance_after'  => $customer->fresh()->points,
                         'reference_type' => Sale::class,
                         'reference_id'   => $sale->id,
                         'notes'          => "Pembelian {$sale->sale_number}",
@@ -767,31 +787,30 @@ class TransactionController extends Controller
                 }
             }
 
-            // ── Bersihkan cart aktif ───────────────────────────────────────────
             Cart::where('cashier_id', $user->id)
                 ->where('store_id', $storeId)
                 ->whereNull('hold_id')
                 ->delete();
+
+            return $sale;
         });
 
-        return redirect()->route('transactions.index')
-            ->with('success', 'Transaksi berhasil disimpan!');
+        return redirect()->route('transactions.print', ['saleNumber' => str_replace('/', '-', $sale->sale_number)])
+            ->with('success', 'Transaksi berhasil disimpan!')
+            ->with('from_transaction', true);
     }
 
     // =========================================================================
     // PRIVATE HELPERS
     // =========================================================================
 
-    /**
-     * Load cart aktif kasir dengan semua relasi yang dibutuhkan frontend.
-     */
     private function getActiveCarts(int $cashierId, string $storeId): Collection
     {
         return Cart::with([
                 'variant:id,name,code,image',
                 'intensity:id,name,code',
                 'size:id,name,volume_ml',
-                'packagings.packagingMaterial:id,name,code,selling_price',
+                'packagings.packagingMaterial:id,name,code,selling_price,is_free,free_condition_note',
             ])
             ->where('cashier_id', $cashierId)
             ->where('store_id', $storeId)
@@ -800,9 +819,6 @@ class TransactionController extends Controller
             ->get();
     }
 
-    /**
-     * Hitung total semua cart items termasuk packaging mereka.
-     */
     private function calcCartsTotal(Collection $carts): int
     {
         return (int) $carts->sum(function ($cart) {
@@ -813,9 +829,6 @@ class TransactionController extends Controller
         });
     }
 
-    /**
-     * Load held carts grouped by hold_id.
-     */
     private function getHeldCarts(int $cashierId, string $storeId): Collection
     {
         return Cart::where('cashier_id', $cashierId)
@@ -833,48 +846,6 @@ class TransactionController extends Controller
             ]);
     }
 
-    /**
-     * Filter variants berdasarkan store_category whitelist (migration 011).
-     *
-     * Logic:
-     *   1. Store tanpa store_category_id        → semua variant
-     *   2. store_category.allow_all_variants     → semua variant
-     *   3. Whitelist kosong                      → semua variant (safety fallback)
-     *   4. Ada whitelist aktif                   → hanya variant di whitelist
-     */
-    private function getVariantsForStore(?Store $store): Collection
-    {
-        $base = Variant::where('is_active', true)->orderBy('sort_order');
-
-        if (! $store || ! $store->store_category_id) {
-            return $base->get(['id', 'name', 'code', 'gender', 'image']);
-        }
-
-        $category = $store->storeCategory;
-
-        if (! $category || $category->allow_all_variants) {
-            return $base->get(['id', 'name', 'code', 'gender', 'image']);
-        }
-
-        $allowedIds = $category->variants()
-            ->wherePivot('is_active', true)
-            ->pluck('variants.id');
-
-        if ($allowedIds->isEmpty()) {
-            return $base->get(['id', 'name', 'code', 'gender', 'image']); // safety fallback
-        }
-
-        return $base->whereIn('id', $allowedIds)
-            ->get(['id', 'name', 'code', 'gender', 'image']);
-    }
-
-    /**
-     * Ambil discounts aktif yang valid untuk store ini.
-     *
-     * Logika store scoping:
-     *   - Tidak ada baris di discount_stores  → berlaku semua store
-     *   - Ada baris di discount_stores        → hanya store yang terdaftar
-     */
     private function getActiveDiscountsForStore(string $storeId): Collection
     {
         return DiscountType::where('is_active', true)
@@ -895,8 +866,8 @@ class TransactionController extends Controller
     }
 
     /**
-     * Hitung subtotals dan COGS dari carts + standalone packagings.
-     * @return array [subtotalPerfume, subtotalPackaging, cogsPerfume, cogsPackaging]
+     * Hitung subtotals.
+     * PENTING: packaging gratis (is_free) → unit_price = 0, tapi HPP tetap dihitung.
      */
     private function calcSubtotals(Collection $carts, array $standalonePkgs): array
     {
@@ -906,36 +877,48 @@ class TransactionController extends Controller
             $sp += $cart->unit_price * $cart->qty;
             $cp += ($cart->product?->production_cost ?? 0) * $cart->qty;
             foreach ($cart->packagings as $pkg) {
+                // unit_price sudah 0 jika is_free (disimpan saat add-to-cart)
                 $sc += $pkg->unit_price * $pkg->qty;
                 $cc += ($pkg->packagingMaterial?->average_cost ?? 0) * $pkg->qty;
             }
         }
 
         foreach ($standalonePkgs as $s) {
-            $sc += ($s['pkg']->selling_price ?? 0) * $s['qty'];
-            $cc += ($s['pkg']->average_cost  ?? 0) * $s['qty'];
+            $effectivePrice = $s['pkg']->is_free ? 0 : ($s['pkg']->selling_price ?? 0);
+            $sc += $effectivePrice * $s['qty'];
+            $cc += ($s['pkg']->average_cost ?? 0) * $s['qty'];
         }
 
         return [(int) $sp, (int) $sc, (int) $cp, (int) $cc];
     }
 
     /**
-     * Buat record SaleItemPackaging dari CartPackaging.
+     * Buat SaleItemPackaging.
+     * Jika packaging gratis: nama diberi suffix [GRATIS], unit_price = 0,
+     * cogs_total tetap dihitung (dari average_cost).
      */
     private function createSaleItemPackaging(string $saleItemId, $cartPkg): void
     {
-        $sub  = $cartPkg->unit_price * $cartPkg->qty;
-        $cogs = ($cartPkg->packagingMaterial?->average_cost ?? 0) * $cartPkg->qty;
+        $pkg      = $cartPkg->packagingMaterial;
+        $isFree   = $pkg?->is_free ?? false;
+
+        // unit_price di cart sudah 0 jika is_free (set saat add-to-cart)
+        $unitPrice = $cartPkg->unit_price;
+        $sub       = $unitPrice * $cartPkg->qty;
+        $unitCost  = $pkg?->average_cost ?? 0;
+        $cogs      = $unitCost * $cartPkg->qty;
+
+        $name = ($pkg?->name ?? 'Packaging') . ($isFree ? ' [GRATIS]' : '');
 
         SaleItemPackaging::create([
             'sale_item_id'          => $saleItemId,
             'packaging_material_id' => $cartPkg->packaging_material_id,
-            'packaging_name'        => $cartPkg->packagingMaterial?->name ?? 'Packaging',
-            'packaging_code'        => $cartPkg->packagingMaterial?->code,
+            'packaging_name'        => $name,
+            'packaging_code'        => $pkg?->code,
             'qty'                   => $cartPkg->qty,
-            'unit_price'            => $cartPkg->unit_price,
+            'unit_price'            => $unitPrice,
             'subtotal'              => $sub,
-            'unit_cost'             => $cartPkg->packagingMaterial?->average_cost ?? 0,
+            'unit_cost'             => $unitCost,
             'cogs_total'            => $cogs,
             'line_gross_profit'     => $sub - $cogs,
             'line_gross_margin_pct' => $sub > 0
@@ -943,9 +926,6 @@ class TransactionController extends Controller
         ]);
     }
 
-    /**
-     * Build nama produk dari relasi cart (fallback jika products.name kosong).
-     */
     private function buildProductName($cart): string
     {
         if ($cart->product?->name) {
@@ -958,12 +938,10 @@ class TransactionController extends Controller
         ]));
     }
 
-    /**
-     * Generate sale number aman dari race condition: INV/YYYYMMDD/XXXXX
-     */
     private function generateSaleNumber(string $storeId): string
     {
-        $prefix = 'INV/' . now()->format('Ymd') . '/';
+        // Format: INV-20260306-00001 (pakai dash bukan slash agar aman di URL)
+        $prefix = 'INV-' . now()->format('Ymd') . '-';
         $last   = Sale::where('sale_number', 'like', $prefix . '%')
             ->lockForUpdate()
             ->orderByDesc('sale_number')

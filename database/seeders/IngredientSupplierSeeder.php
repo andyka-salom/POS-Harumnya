@@ -83,9 +83,9 @@ class IngredientSupplierSeeder extends Seeder
                 'phone'          => '021-11112222',
                 'email'          => 'sales@aromanusantara.com',
                 'address'        => 'Jl. Industri Aroma No. 10, Jakarta',
-                'tax_id'         => '01.234.567.8-901.000',
+                // 'tax_id'         => '01.234.567.8-901.000', // Removed as it's not in your schema
                 'payment_term'   => 'credit_30',
-                'credit_limit'   => 50000000,
+                'credit_limit'   => 50000000.00, // Ensure decimal format
                 'is_active'      => true,
                 'created_at'     => $now,
                 'updated_at'     => $now,
@@ -98,9 +98,9 @@ class IngredientSupplierSeeder extends Seeder
                 'phone'          => '021-33334444',
                 'email'          => 'order@wangisejahtera.com',
                 'address'        => 'Jl. Fragrance No. 25, Tangerang',
-                'tax_id'         => '02.345.678.9-012.000',
+                // 'tax_id'         => '02.345.678.9-012.000', // Removed as it's not in your schema
                 'payment_term'   => 'credit_14',
-                'credit_limit'   => 25000000,
+                'credit_limit'   => 25000000.00, // Ensure decimal format
                 'is_active'      => true,
                 'created_at'     => $now,
                 'updated_at'     => $now,
@@ -113,9 +113,9 @@ class IngredientSupplierSeeder extends Seeder
                 'phone'          => '021-55556666',
                 'email'          => 'info@kimiajaya.com',
                 'address'        => 'Jl. Kimia Raya No. 88, Bekasi',
-                'tax_id'         => '03.456.789.0-123.000',
+                // 'tax_id'         => '03.456.789.0-123.000', // Removed as it's not in your schema
                 'payment_term'   => 'cash',
-                'credit_limit'   => 0,
+                'credit_limit'   => 0.00, // Ensure decimal format
                 'is_active'      => true,
                 'created_at'     => $now,
                 'updated_at'     => $now,

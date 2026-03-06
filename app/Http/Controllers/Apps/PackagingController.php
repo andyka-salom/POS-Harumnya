@@ -23,7 +23,6 @@ class PackagingController extends Controller
             ->orderBy('name')
             ->paginate(10)
             ->withQueryString()
-            // PENTING: ->through() agar accessor image_url dan relasi terbawa ke frontend
             ->through(fn($item) => [
                 'id'                    => $item->id,
                 'code'                  => $item->code,
@@ -33,6 +32,9 @@ class PackagingController extends Controller
                 'description'           => $item->description,
                 'purchase_price'        => $item->purchase_price,
                 'selling_price'         => $item->selling_price,
+                'is_free'               => $item->is_free,
+                'free_condition_note'   => $item->free_condition_note,
+                'effective_selling_price' => $item->effective_selling_price,
                 'average_cost'          => $item->average_cost,
                 'is_available_as_addon' => $item->is_available_as_addon,
                 'is_active'             => $item->is_active,
@@ -74,6 +76,8 @@ class PackagingController extends Controller
             'description'           => 'nullable|string',
             'purchase_price'        => 'nullable|integer|min:0',
             'selling_price'         => 'nullable|integer|min:0',
+            'is_free'               => 'boolean',
+            'free_condition_note'   => 'nullable|string|max:255',
             'is_available_as_addon' => 'boolean',
             'is_active'             => 'boolean',
             'sort_order'            => 'nullable|integer|min:0',
@@ -86,6 +90,11 @@ class PackagingController extends Controller
         $data['average_cost'] = $data['purchase_price'] ?? 0;
         $data['sort_order']   = $data['sort_order'] ?? 0;
 
+        // Jika is_free aktif tapi selling_price tidak diset, pastikan 0
+        if (!empty($data['is_free'])) {
+            $data['selling_price'] = $data['selling_price'] ?? 0;
+        }
+
         PackagingMaterial::create($data);
 
         return redirect()->route('packaging.index')
@@ -95,7 +104,6 @@ class PackagingController extends Controller
     public function edit(PackagingMaterial $packaging)
     {
         return Inertia::render('Dashboard/Packaging/Edit', [
-            // Kirim array eksplisit agar image_url accessor dan semua field terkirim dengan benar
             'packaging' => [
                 'id'                    => $packaging->id,
                 'code'                  => $packaging->code,
@@ -106,6 +114,8 @@ class PackagingController extends Controller
                 'description'           => $packaging->description,
                 'purchase_price'        => $packaging->purchase_price,
                 'selling_price'         => $packaging->selling_price,
+                'is_free'               => $packaging->is_free,
+                'free_condition_note'   => $packaging->free_condition_note,
                 'average_cost'          => $packaging->average_cost,
                 'is_available_as_addon' => $packaging->is_available_as_addon,
                 'is_active'             => $packaging->is_active,
@@ -129,24 +139,23 @@ class PackagingController extends Controller
             'description'           => 'nullable|string',
             'purchase_price'        => 'nullable|integer|min:0',
             'selling_price'         => 'nullable|integer|min:0',
+            'is_free'               => 'boolean',
+            'free_condition_note'   => 'nullable|string|max:255',
             'is_available_as_addon' => 'boolean',
             'is_active'             => 'boolean',
             'sort_order'            => 'nullable|integer|min:0',
-            // average_cost TIDAK boleh diubah manual dari form — hanya via WAC saat purchase
+            // average_cost TIDAK boleh diubah manual — hanya via WAC saat purchase
         ]);
 
         if ($request->hasFile('image')) {
-            // Ada file baru → hapus lama, simpan baru
             if ($packaging->image) {
                 Storage::disk('public')->delete($packaging->image);
             }
             $data['image'] = $request->file('image')->store('packaging', 'public');
         } else {
-            // Tidak ada file baru → JANGAN overwrite, buang key image dari $data
             unset($data['image']);
         }
 
-        // Inisialisasi average_cost hanya jika belum pernah ada purchase
         if ((float) $packaging->average_cost === 0.0 && isset($data['purchase_price'])) {
             $data['average_cost'] = $data['purchase_price'];
         }
@@ -194,7 +203,6 @@ class PackagingController extends Controller
 
     public function destroyCategory(PackagingCategory $category)
     {
-        // Cek relasi materials sebelum hapus
         if ($category->materials()->exists()) {
             return back()->with('error', 'Gagal: Kategori masih memiliki material di dalamnya. Pindahkan atau hapus material terlebih dahulu.');
         }

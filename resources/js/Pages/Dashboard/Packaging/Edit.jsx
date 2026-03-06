@@ -4,13 +4,12 @@ import { Head, useForm, Link } from "@inertiajs/react";
 import Input from "@/Components/Dashboard/Input";
 import {
     IconArrowLeft, IconDeviceFloppy, IconPhoto,
-    IconCoin, IconInfoCircle, IconLock, IconPackage,
+    IconCoin, IconInfoCircle, IconLock, IconPackage, IconGift,
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
 
 const fmt = (v = 0) => Number(v || 0).toLocaleString("id-ID");
 
-// ─── Custom Select (tidak double arrow) ────────────────────────────────────────
 function Select({ label, required, value, onChange, errors, children }) {
     return (
         <div>
@@ -41,35 +40,36 @@ function Select({ label, required, value, onChange, errors, children }) {
     );
 }
 
-// ─── Price Input ───────────────────────────────────────────────────────────────
-function PriceInput({ label, value, onChange, hint, errors, readOnly = false }) {
+function PriceInput({ label, value, onChange, hint, errors, readOnly = false, disabled = false }) {
+    const isLocked = readOnly || disabled;
     return (
         <div>
             {label && (
-                <label className="block text-sm font-medium mb-1 dark:text-slate-300">
+                <label className={`block text-sm font-medium mb-1 ${isLocked ? "text-slate-400 dark:text-slate-600" : "dark:text-slate-300"}`}>
                     {readOnly && <IconLock size={12} className="inline mr-1 text-slate-400" />}
                     {label}
                 </label>
             )}
             <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">Rp</span>
+                <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${isLocked ? "text-slate-300 dark:text-slate-700" : "text-slate-400"}`}>Rp</span>
                 <input
                     type="text"
                     inputMode="numeric"
                     readOnly={readOnly}
-                    value={readOnly ? fmt(Math.round(value)) : (value ? fmt(value) : "")}
-                    onChange={readOnly ? undefined : e => onChange(Number(e.target.value.replace(/\D/g, "")))}
-                    placeholder={readOnly ? undefined : "0"}
+                    disabled={disabled}
+                    value={disabled ? "0" : readOnly ? fmt(Math.round(value)) : (value ? fmt(value) : "")}
+                    onChange={isLocked ? undefined : e => onChange(Number(e.target.value.replace(/\D/g, "")))}
+                    placeholder={isLocked ? undefined : "0"}
                     className={`w-full h-10 pl-10 pr-3 rounded-xl border text-sm transition-all
-                        ${readOnly
-                            ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-500 cursor-not-allowed"
+                        ${isLocked
+                            ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-400 cursor-not-allowed"
                             : `bg-white dark:bg-slate-950 dark:text-white
                                focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                                ${errors ? "border-red-400" : "border-slate-300 dark:border-slate-700"}`
                         }`}
                 />
             </div>
-            {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
+            {hint && <p className={`text-[11px] mt-1 ${isLocked ? "text-slate-300 dark:text-slate-700" : "text-slate-400"}`}>{hint}</p>}
             {errors && <p className="text-red-500 text-xs mt-1">{errors}</p>}
         </div>
     );
@@ -81,17 +81,19 @@ export default function Edit({ packaging, categories, sizes }) {
     const { data, setData, post, processing, errors } = useForm({
         _method:                "PUT",
         packaging_category_id:  packaging.packaging_category_id || "",
-        code:                   packaging.code        || "",
-        name:                   packaging.name        || "",
-        unit:                   packaging.unit        || "pcs",
-        size_id:                packaging.size_id     || "",
-        image:                  null,   // null = tidak ada file baru → foto lama dipertahankan
-        description:            packaging.description || "",
-        purchase_price:         packaging.purchase_price  || 0,
-        selling_price:          packaging.selling_price   || 0,
+        code:                   packaging.code              || "",
+        name:                   packaging.name              || "",
+        unit:                   packaging.unit              || "pcs",
+        size_id:                packaging.size_id           || "",
+        image:                  null,
+        description:            packaging.description       || "",
+        purchase_price:         packaging.purchase_price    || 0,
+        selling_price:          packaging.selling_price     || 0,
+        is_free:                !!packaging.is_free,
+        free_condition_note:    packaging.free_condition_note || "",
         is_available_as_addon:  !!packaging.is_available_as_addon,
         is_active:              !!packaging.is_active,
-        sort_order:             packaging.sort_order  ?? 0,
+        sort_order:             packaging.sort_order        ?? 0,
     });
 
     const handleImage = (e) => {
@@ -110,16 +112,18 @@ export default function Edit({ packaging, categories, sizes }) {
     const submit = (e) => {
         e.preventDefault();
         post(route("packaging.update", packaging.id), {
-            forceFormData: true,    // WAJIB agar file gambar terkirim
+            forceFormData: true,
             onSuccess: () => toast.success("Perubahan berhasil disimpan"),
             onError:   () => toast.error("Periksa kembali form Anda"),
         });
     };
 
-    const avgCost = parseFloat(packaging.average_cost || 0);
-    const margin  = data.selling_price > 0 && avgCost > 0
-        ? (((data.selling_price - avgCost) / data.selling_price) * 100).toFixed(1)
+    const avgCost       = parseFloat(packaging.average_cost || 0);
+    const effectivePrice = data.is_free ? 0 : data.selling_price;
+    const margin = !data.is_free && effectivePrice > 0 && avgCost > 0
+        ? (((effectivePrice - avgCost) / effectivePrice) * 100).toFixed(1)
         : null;
+    const subsidyPerUnit = data.is_free && avgCost > 0 ? avgCost : null;
 
     return (
         <>
@@ -231,6 +235,48 @@ export default function Edit({ packaging, categories, sizes }) {
                                     </p>
                                 </div>
 
+                                {/* Toggle Gratis */}
+                                <div className={`mb-5 p-4 rounded-xl border transition-all ${
+                                    data.is_free
+                                        ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900"
+                                        : "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700"
+                                }`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <IconGift size={18} className={data.is_free ? "text-emerald-600" : "text-slate-400"} />
+                                            <div>
+                                                <span className={`text-sm font-bold ${data.is_free ? "text-emerald-700 dark:text-emerald-400" : "dark:text-white"}`}>
+                                                    Kemasan Gratis
+                                                </span>
+                                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                                    Gratis ke pelanggan; HPP tetap dihitung untuk laporan
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={data.is_free}
+                                                onChange={e => setData("is_free", e.target.checked)}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-slate-200 peer-checked:bg-emerald-500 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-400 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5" />
+                                        </label>
+                                    </div>
+
+                                    {data.is_free && (
+                                        <div className="mt-3">
+                                            <Input
+                                                label="Keterangan Gratis"
+                                                value={data.free_condition_note}
+                                                onChange={e => setData("free_condition_note", e.target.value)}
+                                                errors={errors.free_condition_note}
+                                                placeholder="Cth: Gratis untuk setiap pembelian"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <PriceInput
                                         label="Harga Beli (Rp)"
@@ -243,8 +289,9 @@ export default function Edit({ packaging, categories, sizes }) {
                                         label="Harga Jual Add-on (Rp)"
                                         value={data.selling_price}
                                         onChange={v => setData("selling_price", v)}
-                                        hint="Harga ke pelanggan di POS"
+                                        hint={data.is_free ? "Diabaikan — kemasan ini gratis" : "Harga ke pelanggan di POS"}
                                         errors={errors.selling_price}
+                                        disabled={data.is_free}
                                     />
                                     <PriceInput
                                         label="HPP / Biaya Rata-rata"
@@ -254,6 +301,7 @@ export default function Edit({ packaging, categories, sizes }) {
                                     />
                                 </div>
 
+                                {/* Margin normal */}
                                 {margin !== null && (
                                     <div className={`mt-4 p-3 rounded-xl flex items-center justify-between text-sm ${
                                         parseFloat(margin) >= 0
@@ -263,7 +311,7 @@ export default function Edit({ packaging, categories, sizes }) {
                                         <div>
                                             <span className="text-slate-600 dark:text-slate-400 font-medium">Margin Add-on (vs HPP aktual)</span>
                                             <p className="text-xs text-slate-400 mt-0.5">
-                                                Jual {fmt(data.selling_price)} − HPP {fmt(Math.round(avgCost))}
+                                                Jual {fmt(effectivePrice)} − HPP {fmt(Math.round(avgCost))}
                                             </p>
                                         </div>
                                         <div className="text-right">
@@ -271,15 +319,36 @@ export default function Edit({ packaging, categories, sizes }) {
                                                 {margin}%
                                             </span>
                                             <span className={`block text-xs ${parseFloat(margin) >= 0 ? "text-teal-500" : "text-red-400"}`}>
-                                                Rp {fmt(data.selling_price - Math.round(avgCost))} / unit
+                                                Rp {fmt(effectivePrice - Math.round(avgCost))} / unit
                                             </span>
                                         </div>
                                     </div>
                                 )}
 
-                                {avgCost > 0 && data.selling_price > 0 && avgCost > data.selling_price && (
+                                {/* Peringatan harga jual < HPP */}
+                                {!data.is_free && avgCost > 0 && data.selling_price > 0 && avgCost > data.selling_price && (
                                     <div className="mt-3 p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl text-xs text-red-600 flex items-center gap-2">
                                         ⚠️ <strong>Harga jual lebih rendah dari HPP!</strong> Rugi Rp {fmt(Math.round(avgCost) - data.selling_price)} per unit.
+                                    </div>
+                                )}
+
+                                {/* Info subsidi jika gratis */}
+                                {subsidyPerUnit !== null && (
+                                    <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 flex items-center justify-between text-sm">
+                                        <div>
+                                            <span className="text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1.5">
+                                                <IconGift size={14} /> Biaya Subsidi Kemasan (HPP Aktual)
+                                            </span>
+                                            <p className="text-[11px] text-amber-600/70 dark:text-amber-500/60 mt-0.5">
+                                                Dicatat sebagai beban biaya, bukan pendapatan
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="font-bold text-base text-amber-700 dark:text-amber-400">
+                                                Rp {fmt(Math.round(subsidyPerUnit))}
+                                            </span>
+                                            <span className="block text-xs text-amber-500">per unit</span>
+                                        </div>
                                     </div>
                                 )}
                             </div>

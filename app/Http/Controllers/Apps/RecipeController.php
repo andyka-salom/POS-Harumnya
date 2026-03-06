@@ -13,11 +13,15 @@ use App\Models\IntensitySizeQuantity;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class RecipeController extends Controller
 {
-    // ─── Index ────────────────────────────────────────────────────────────────
+    // =========================================================================
+    // INDEX
+    // =========================================================================
 
     public function index()
     {
@@ -28,18 +32,22 @@ class RecipeController extends Controller
             ->groupBy('variant_id', 'intensity_id')
             ->get()
             ->map(function ($item) {
-                // Load recipes dengan eager-load category untuk ingredient_type
                 $recipes = VariantRecipe::with('ingredient.category')
                     ->where('variant_id', $item->variant_id)
                     ->where('intensity_id', $item->intensity_id)
                     ->get();
 
-                // IntensitySizeQuantity untuk semua size yang aktif
                 $sizeQuantities = IntensitySizeQuantity::with('size')
                     ->where('intensity_id', $item->intensity_id)
                     ->where('is_active', true)
                     ->get()
                     ->sortBy('size.volume_ml');
+
+                // Cek apakah sudah ada product yang di-generate
+                $generatedSizes = Product::where('variant_id', $item->variant_id)
+                    ->where('intensity_id', $item->intensity_id)
+                    ->pluck('size_id')
+                    ->toArray();
 
                 return [
                     'variant'          => $item->variant,
@@ -49,16 +57,17 @@ class RecipeController extends Controller
                     'recipes'          => $recipes,
                     'variant_id'       => $item->variant_id,
                     'intensity_id'     => $item->intensity_id,
-                    // Preview scaling — menggunakan scaleCollection per size
+                    'generated_sizes'  => $generatedSizes,
+                    'is_generated'     => count($generatedSizes) > 0,
                     'size_scaling'     => $sizeQuantities->map(fn($q) => [
-                        'size_id'      => $q->size->id,
-                        'size_name'    => $q->size->name,
-                        'volume_ml'    => $q->size->volume_ml,
-                        'total_volume' => $q->total_volume,
+                        'size_id'          => $q->size->id,
+                        'size_name'        => $q->size->name,
+                        'volume_ml'        => $q->size->volume_ml,
+                        'total_volume'     => $q->total_volume,
                         'oil_quantity'     => $q->oil_quantity,
                         'alcohol_quantity' => $q->alcohol_quantity,
                         'other_quantity'   => $q->other_quantity ?? 0,
-                        'ingredients'  => $this->buildScaledIngredients($recipes, $q),
+                        'ingredients'      => $this->buildScaledIngredients($recipes, $q),
                     ])->values(),
                 ];
             });
@@ -68,7 +77,9 @@ class RecipeController extends Controller
         ]);
     }
 
-    // ─── Create ───────────────────────────────────────────────────────────────
+    // =========================================================================
+    // CREATE
+    // =========================================================================
 
     public function create()
     {
@@ -76,11 +87,6 @@ class RecipeController extends Controller
             ->orderBy('sort_order')
             ->get(['id', 'code', 'name', 'oil_ratio', 'alcohol_ratio']);
 
-        // Kirim IntensitySizeQuantity per intensity ke frontend
-        // Format: array of { intensity_id, size, oil_quantity, alcohol_quantity, other_quantity, total_volume }
-        // Sengaja dikirim sebagai flat array (bukan grouped object) agar tidak ada masalah
-        // saat PHP associative array di-JSON-encode kehilangan UUID key-nya.
-        // Di frontend, filter berdasarkan intensity_id yang dipilih.
         $intensitySizeQuantities = IntensitySizeQuantity::with('size:id,name,volume_ml')
             ->where('is_active', true)
             ->get()
@@ -98,46 +104,40 @@ class RecipeController extends Controller
             'variants'   => Variant::where('is_active', true)
                 ->orderBy('sort_order')
                 ->get(['id', 'code', 'name', 'gender']),
-            'intensities' => $intensities,
-            // Eager-load category untuk tampilkan ingredient_type di form
-            'ingredients' => Ingredient::with('category:id,name,ingredient_type')
+            'intensities'             => $intensities,
+            'ingredients'             => Ingredient::with('category:id,name,ingredient_type')
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->get(['id', 'code', 'name', 'unit', 'ingredient_category_id']),
-            // Map intensity_id → array of size quantities untuk preview scaling di frontend
             'intensitySizeQuantities' => $intensitySizeQuantities,
         ]);
     }
 
-    // ─── Store ────────────────────────────────────────────────────────────────
+    // =========================================================================
+    // STORE
+    // =========================================================================
 
     public function store(Request $request)
     {
-        $request->validate([
-            'variant_id'               => 'required|exists:variants,id',
-            'intensity_id'             => 'required|exists:intensities,id',
-            'items'                    => 'required|array|min:1',
-            'items.*.ingredient_id'    => 'required|exists:ingredients,id',
-            'items.*.base_quantity'    => 'required|numeric|min:0.01',
-            'items.*.unit'             => 'nullable|string|max:50',
-            'items.*.notes'            => 'nullable|string|max:255',
+        $validated = $request->validate([
+            'variant_id'            => 'required|exists:variants,id',
+            'intensity_id'          => 'required|exists:intensities,id',
+            'items'                 => 'required|array|min:1',
+            'items.*.ingredient_id' => 'required|exists:ingredients,id',
+            'items.*.base_quantity' => 'required|numeric|min:0.01',
+            'items.*.unit'          => 'nullable|string|max:50',
+            'items.*.notes'         => 'nullable|string|max:255',
         ]);
 
-        // Cek duplikat kombinasi
-        $exists = VariantRecipe::where('variant_id', $request->variant_id)
-            ->where('intensity_id', $request->intensity_id)
-            ->exists();
-
-        DB::transaction(function () use ($request) {
-            // Hapus dulu jika sudah ada (overwrite)
-            VariantRecipe::where('variant_id', $request->variant_id)
-                ->where('intensity_id', $request->intensity_id)
+        DB::transaction(function () use ($validated) {
+            VariantRecipe::where('variant_id', $validated['variant_id'])
+                ->where('intensity_id', $validated['intensity_id'])
                 ->delete();
 
-            foreach ($request->items as $item) {
+            foreach ($validated['items'] as $item) {
                 VariantRecipe::create([
-                    'variant_id'    => $request->variant_id,
-                    'intensity_id'  => $request->intensity_id,
+                    'variant_id'    => $validated['variant_id'],
+                    'intensity_id'  => $validated['intensity_id'],
                     'ingredient_id' => $item['ingredient_id'],
                     'base_quantity' => $item['base_quantity'],
                     'unit'          => $item['unit'] ?? 'ml',
@@ -150,15 +150,20 @@ class RecipeController extends Controller
             ->with('success', 'Formula variant berhasil disimpan untuk base 30ml');
     }
 
-    // ─── Show ─────────────────────────────────────────────────────────────────
+    // =========================================================================
+    // SHOW
+    // =========================================================================
 
     public function show($variant_id, $intensity_id)
     {
-        // WAJIB eager-load ingredient.category untuk ingredient_type
         $recipes = VariantRecipe::with(['ingredient.category', 'variant', 'intensity'])
             ->where('variant_id', $variant_id)
             ->where('intensity_id', $intensity_id)
             ->get();
+
+        if ($recipes->isEmpty()) {
+            abort(404, 'Formula tidak ditemukan.');
+        }
 
         $variant   = Variant::findOrFail($variant_id);
         $intensity = Intensity::findOrFail($intensity_id);
@@ -171,7 +176,9 @@ class RecipeController extends Controller
         ]);
     }
 
-    // ─── Edit ─────────────────────────────────────────────────────────────────
+    // =========================================================================
+    // EDIT
+    // =========================================================================
 
     public function edit($variant_id, $intensity_id)
     {
@@ -180,10 +187,13 @@ class RecipeController extends Controller
             ->where('intensity_id', $intensity_id)
             ->get();
 
+        if ($recipes->isEmpty()) {
+            abort(404, 'Formula tidak ditemukan.');
+        }
+
         $variant   = Variant::findOrFail($variant_id);
         $intensity = Intensity::findOrFail($intensity_id);
 
-        // IntensitySizeQuantity untuk intensity ini — dikirim ke frontend untuk preview scaling
         $sizeQuantities = IntensitySizeQuantity::with('size:id,name,volume_ml')
             ->where('intensity_id', $intensity_id)
             ->where('is_active', true)
@@ -213,30 +223,34 @@ class RecipeController extends Controller
             'ingredients'    => Ingredient::with('category:id,name,ingredient_type')
                 ->where('is_active', true)
                 ->get(['id', 'code', 'name', 'unit', 'ingredient_category_id']),
-            // Array of { size, oil_quantity, alcohol_quantity, other_quantity, total_volume }
-            // untuk preview scaling akurat (LRM per ingredient_type) di Edit form
             'sizeQuantities' => $sizeQuantities,
         ]);
     }
 
-    // ─── Update ───────────────────────────────────────────────────────────────
+    // =========================================================================
+    // UPDATE
+    // =========================================================================
 
     public function update(Request $request, $variant_id, $intensity_id)
     {
-        $request->validate([
-            'items'                    => 'required|array|min:1',
-            'items.*.ingredient_id'    => 'required|exists:ingredients,id',
-            'items.*.base_quantity'    => 'required|numeric|min:0.01',
-            'items.*.unit'             => 'nullable|string|max:50',
-            'items.*.notes'            => 'nullable|string|max:255',
+        $validated = $request->validate([
+            'items'                 => 'required|array|min:1',
+            'items.*.ingredient_id' => 'required|exists:ingredients,id',
+            'items.*.base_quantity' => 'required|numeric|min:0.01',
+            'items.*.unit'          => 'nullable|string|max:50',
+            'items.*.notes'         => 'nullable|string|max:255',
         ]);
 
-        DB::transaction(function () use ($request, $variant_id, $intensity_id) {
+        // Pastikan variant & intensity ada
+        Variant::findOrFail($variant_id);
+        Intensity::findOrFail($intensity_id);
+
+        DB::transaction(function () use ($validated, $variant_id, $intensity_id) {
             VariantRecipe::where('variant_id', $variant_id)
                 ->where('intensity_id', $intensity_id)
                 ->delete();
 
-            foreach ($request->items as $item) {
+            foreach ($validated['items'] as $item) {
                 VariantRecipe::create([
                     'variant_id'    => $variant_id,
                     'intensity_id'  => $intensity_id,
@@ -252,10 +266,20 @@ class RecipeController extends Controller
             ->with('success', 'Formula variant berhasil diupdate');
     }
 
-    // ─── Destroy ──────────────────────────────────────────────────────────────
+    // =========================================================================
+    // DESTROY
+    // =========================================================================
 
     public function destroy($variant_id, $intensity_id)
     {
+        $exists = VariantRecipe::where('variant_id', $variant_id)
+            ->where('intensity_id', $intensity_id)
+            ->exists();
+
+        if (!$exists) {
+            return back()->with('error', 'Formula tidak ditemukan.');
+        }
+
         DB::transaction(function () use ($variant_id, $intensity_id) {
             VariantRecipe::where('variant_id', $variant_id)
                 ->where('intensity_id', $intensity_id)
@@ -265,108 +289,10 @@ class RecipeController extends Controller
         return back()->with('success', 'Formula variant berhasil dihapus');
     }
 
-    // ─── Private: calculateSizePreview ────────────────────────────────────────
+    // =========================================================================
+    // GENERATE PRODUCTS
+    // =========================================================================
 
-    /**
-     * Hitung preview scaling per size menggunakan ingredient_type.
-     *
-     * Flow:
-     *   - Tiap bahan dikelompokkan berdasarkan ingredient_type kategorinya
-     *   - oil      → di-scale ke oil_quantity dari IntensitySizeQuantity
-     *   - alcohol  → di-scale ke alcohol_quantity
-     *   - other    → di-scale ke other_quantity (0 jika belum dikonfigurasi)
-     *   - LRM diterapkan per grup agar total tiap tipe selalu tepat integer
-     *
-     * Fallback jika IntensitySizeQuantity belum dikonfigurasi:
-     *   - Scale proporsional sederhana berdasarkan volume_ml size
-     *
-     * @param  \Illuminate\Support\Collection $recipes    VariantRecipe collection
-     *                                                     (wajib eager-load ingredient.category)
-     * @param  string                         $intensityId
-     */
-    private function calculateSizePreview($recipes, string $intensityId): array
-    {
-        $sizes = Size::where('is_active', true)->orderBy('volume_ml')->get();
-
-        return $sizes->map(function ($size) use ($recipes, $intensityId) {
-            $intensityQty = IntensitySizeQuantity::getFor($intensityId, $size->id);
-
-            if (!$intensityQty) {
-                // Fallback tanpa kalibrasi
-                $baseTotalVolume = $recipes->sum(fn($r) => (float) $r->base_quantity);
-                return [
-                    'size'          => $size,
-                    'total_volume'  => $size->volume_ml,
-                    'is_calibrated' => false,
-                    'ingredients'   => $recipes->map(fn($recipe) => [
-                        'ingredient'        => $recipe->ingredient,
-                        'ingredient_type'   => $recipe->ingredient->category->ingredient_type ?? 'other',
-                        'original_quantity' => (float) $recipe->base_quantity,
-                        'scaled_quantity'   => $recipe->getFallbackScaledQty($baseTotalVolume, $size->volume_ml),
-                        'unit'              => $recipe->unit,
-                    ])->values(),
-                ];
-            }
-
-            // Scale menggunakan ingredient_type + LRM per grup
-            $scaledMap = VariantRecipe::scaleCollection($recipes, $intensityQty);
-
-            return [
-                'size'             => $size,
-                'total_volume'     => $intensityQty->total_volume,
-                'is_calibrated'    => true,
-                'oil_quantity'     => $intensityQty->oil_quantity,
-                'alcohol_quantity' => $intensityQty->alcohol_quantity,
-                'other_quantity'   => $intensityQty->other_quantity ?? 0,
-                'ingredients'      => $recipes->map(function ($recipe, $idx) use ($scaledMap) {
-                    return [
-                        'ingredient'        => $recipe->ingredient,
-                        'ingredient_type'   => $recipe->ingredient->category->ingredient_type ?? 'other',
-                        'original_quantity' => (float) $recipe->base_quantity,
-                        'scaled_quantity'   => $scaledMap[$idx] ?? 0,
-                        'unit'              => $recipe->unit,
-                    ];
-                })->values(),
-            ];
-        })->toArray();
-    }
-
-    // ─── Private: buildScaledIngredients ─────────────────────────────────────
-
-    /**
-     * Helper untuk index() — membangun array ingredient dengan scaled_quantity
-     * untuk ditampilkan di ScalingPreviewTable di halaman Index.
-     */
-    private function buildScaledIngredients($recipes, IntensitySizeQuantity $intensityQty): array
-    {
-        $scaledMap = VariantRecipe::scaleCollection($recipes, $intensityQty);
-
-        return $recipes->map(function ($recipe, $idx) use ($scaledMap) {
-            return [
-                'ingredient_id'   => $recipe->ingredient_id,
-                'name'            => $recipe->ingredient->name ?? '—',
-                'ingredient_type' => $recipe->ingredient->category->ingredient_type ?? 'other',
-                'scaled_quantity' => $scaledMap[$idx] ?? 0,
-                'unit'            => $recipe->unit,
-            ];
-        })->values()->toArray();
-    }
-
-    // ─── Public: generateProducts (dipanggil via tombol di UI) ─────────────────
-
-    /**
-     * Generate products dari variant recipe untuk semua sizes yang terkalibrasi.
-     *
-     * Endpoint: POST /recipes/{variant}/{intensity}/generate-products
-     *
-     * Parameter request opsional:
-     *   - regenerate (bool): jika true, hapus product yang sudah ada lalu buat ulang
-     *
-     * Response JSON:
-     *   - generated: jumlah product baru yang dibuat
-     *   - skipped:   jumlah size yang dilewati (sudah ada / belum terkalibrasi / belum ada harga)
-     *   - details:   array info per size
-     */
     public function generateProducts(Request $request, string $variant_id, string $intensity_id)
     {
         $request->validate([
@@ -378,7 +304,6 @@ class RecipeController extends Controller
         $intensity  = Intensity::findOrFail($intensity_id);
         $sizes      = Size::where('is_active', true)->get();
 
-        // Wajib eager-load ingredient.category untuk ingredient_type
         $recipes = VariantRecipe::with('ingredient.category')
             ->where('variant_id', $variant_id)
             ->where('intensity_id', $intensity_id)
@@ -386,6 +311,17 @@ class RecipeController extends Controller
 
         if ($recipes->isEmpty()) {
             return back()->with('error', 'Formula belum ada — buat formula terlebih dahulu.');
+        }
+
+        // Jika tidak regenerate, cek apakah semua size sudah di-generate
+        if (!$regenerate) {
+            $existingCount = Product::where('variant_id', $variant_id)
+                ->where('intensity_id', $intensity_id)
+                ->count();
+
+            if ($existingCount > 0) {
+                return back()->with('warning', 'Products sudah pernah di-generate. Gunakan Regenerate untuk membuat ulang.');
+            }
         }
 
         $generated = 0;
@@ -402,7 +338,6 @@ class RecipeController extends Controller
                     ->where('size_id', $size->id)
                     ->first();
 
-                // Jika sudah ada dan tidak regenerate → skip
                 if ($existingProduct && !$regenerate) {
                     $skipped++;
                     $details[] = [
@@ -413,7 +348,6 @@ class RecipeController extends Controller
                     continue;
                 }
 
-                // Ambil harga jual
                 $priceRecord = DB::table('intensity_size_prices')
                     ->where('intensity_id', $intensity_id)
                     ->where('size_id', $size->id)
@@ -430,7 +364,6 @@ class RecipeController extends Controller
                     continue;
                 }
 
-                // IntensitySizeQuantity WAJIB ada agar scaling akurat
                 $intensityQty = IntensitySizeQuantity::getFor($intensity_id, $size->id);
                 if (!$intensityQty) {
                     $skipped++;
@@ -442,16 +375,13 @@ class RecipeController extends Controller
                     continue;
                 }
 
-                // Jika regenerate → hapus product & recipes lama
                 if ($existingProduct && $regenerate) {
                     $existingProduct->recipes()->delete();
                     $existingProduct->delete();
                 }
 
-                // Scale semua bahan sekaligus (LRM per ingredient_type)
                 $scaledMap = VariantRecipe::scaleCollection($recipes, $intensityQty);
 
-                // Buat product
                 $product = Product::create([
                     'sku'           => $this->generateSKU($variant, $intensity, $size),
                     'variant_id'    => $variant_id,
@@ -462,7 +392,6 @@ class RecipeController extends Controller
                     'is_active'     => true,
                 ]);
 
-                // Buat product_recipes
                 foreach ($recipes as $idx => $recipe) {
                     $scaledQty  = $scaledMap[$idx] ?? 0;
                     $ingredient = $recipe->ingredient;
@@ -493,21 +422,499 @@ class RecipeController extends Controller
             ? "{$generated} product berhasil di-generate" . ($skipped > 0 ? ", {$skipped} dilewati" : "")
             : "Tidak ada product baru — {$skipped} size dilewati";
 
-        return back()->with($generated > 0 ? 'success' : 'warning', $message)
-                     ->with('generateDetails', $details);
+        return back()
+            ->with($generated > 0 ? 'success' : 'warning', $message)
+            ->with('generateDetails', $details);
     }
 
-    // ─── Private: generateSKU ────────────────────────────────────────────────
+    // =========================================================================
+    // IMPORT — Download Template
+    // =========================================================================
+
+    public function importTemplate()
+    {
+        $variants    = Variant::where('is_active', true)->orderBy('code')->get(['code', 'name', 'gender']);
+        $intensities = Intensity::where('is_active', true)->orderBy('code')->get(['code', 'name', 'oil_ratio', 'alcohol_ratio']);
+        $ingredients = Ingredient::where('is_active', true)->orderBy('code')->get(['code', 'name', 'unit']);
+
+        $templatePath = storage_path('app/templates/template_import_variant_recipe.xlsx');
+
+        if (!file_exists($templatePath)) {
+            $basePath = public_path('templates/template_import_variant_recipe.xlsx');
+            if (!file_exists($basePath)) {
+                abort(404, 'Template file tidak ditemukan. Hubungi administrator.');
+            }
+            if (!is_dir(dirname($templatePath))) {
+                mkdir(dirname($templatePath), 0755, true);
+            }
+            copy($basePath, $templatePath);
+        }
+
+        $spreadsheet = IOFactory::load($templatePath);
+
+        $refSheet = $spreadsheet->getSheetByName('Referensi Kode');
+        if ($refSheet) {
+            $this->fillReferenceSheet($refSheet, $variants, $intensities, $ingredients);
+        }
+
+        $dataSheet = $spreadsheet->getSheetByName('Import Data');
+        if ($dataSheet) {
+            $dataSheet->getCell('A2')->setValue(
+                'Isi data sesuai kolom. WAJIB: variant_code, intensity_code, ingredient_code, base_quantity. '
+                . 'Template dibuat: ' . now()->format('d/m/Y H:i') . ' WIB. Hapus baris contoh sebelum import.'
+            );
+        }
+
+        $filename = 'template_import_formula_variant_' . now()->format('Ymd_His') . '.xlsx';
+        $tmpDir   = storage_path('app/tmp');
+        if (!is_dir($tmpDir)) {
+            mkdir($tmpDir, 0755, true);
+        }
+        $tmpPath = $tmpDir . '/' . $filename;
+
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save($tmpPath);
+
+        return response()->download($tmpPath, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
+    }
+
+    // =========================================================================
+    // IMPORT — Index Page
+    // =========================================================================
+
+    public function importIndex()
+    {
+        return Inertia::render('Dashboard/Recipes/Import');
+    }
+
+    // =========================================================================
+    // IMPORT — Validate (preview, belum simpan)
+    // =========================================================================
+
+    public function importValidate(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:5120',
+        ]);
+
+        try {
+            $rows   = $this->parseExcel($request->file('file'));
+            $result = $this->validateRows($rows);
+            return response()->json($result);
+        } catch (\Exception $e) {
+            Log::error('Recipe import validate error: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Gagal membaca file Excel: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    // =========================================================================
+    // IMPORT — Store (simpan ke database)
+    // =========================================================================
+
+    public function importStore(Request $request)
+    {
+        $request->validate([
+            'file'        => 'required|file|mimes:xlsx,xls|max:5120',
+            'overwrite'   => 'boolean',
+            'skip_errors' => 'boolean',
+        ]);
+
+        $overwrite  = $request->boolean('overwrite', true);
+        $skipErrors = $request->boolean('skip_errors', true);
+
+        try {
+            $rows   = $this->parseExcel($request->file('file'));
+            $result = $this->validateRows($rows);
+        } catch (\Exception $e) {
+            Log::error('Recipe import store error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal membaca file Excel: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        // Jika ada error dan mode tidak skip → tolak semua
+        if (!$skipErrors && count($result['errors']) > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Import dibatalkan: ditemukan ' . count($result['errors']) . ' baris error. Perbaiki terlebih dahulu.',
+                'errors'  => $result['errors'],
+                'summary' => $result['summary'],
+            ], 422);
+        }
+
+        if (count($result['valid_rows']) === 0) {
+            return response()->json([
+                'success'  => false,
+                'message'  => 'Tidak ada baris valid untuk diimport.',
+                'errors'   => $result['errors'],
+                'summary'  => $result['summary'],
+                'imported' => 0,
+                'skipped'  => 0,
+                'overwritten' => 0,
+            ], 422);
+        }
+
+        $imported    = 0;
+        $skipped     = 0;
+        $overwritten = 0;
+
+        try {
+            DB::transaction(function () use ($result, $overwrite, &$imported, &$skipped, &$overwritten) {
+                // Kelompokkan baris valid per kombinasi variant + intensity
+                $groups = [];
+                foreach ($result['valid_rows'] as $row) {
+                    $key = $row['variant_id'] . '|' . $row['intensity_id'];
+                    $groups[$key][] = $row;
+                }
+
+                foreach ($groups as $key => $items) {
+                    [$variantId, $intensityId] = explode('|', $key);
+
+                    $exists = VariantRecipe::where('variant_id', $variantId)
+                        ->where('intensity_id', $intensityId)
+                        ->exists();
+
+                    if ($exists && !$overwrite) {
+                        $skipped += count($items);
+                        continue;
+                    }
+
+                    if ($exists) {
+                        VariantRecipe::where('variant_id', $variantId)
+                            ->where('intensity_id', $intensityId)
+                            ->delete();
+                        $overwritten++;
+                    }
+
+                    foreach ($items as $item) {
+                        VariantRecipe::create([
+                            'variant_id'    => $variantId,
+                            'intensity_id'  => $intensityId,
+                            'ingredient_id' => $item['ingredient_id'],
+                            'base_quantity' => $item['base_quantity'],
+                            'unit'          => $item['unit'],
+                            'notes'         => $item['notes'],
+                        ]);
+                        $imported++;
+                    }
+                }
+            });
+        } catch (\Exception $e) {
+            Log::error('Recipe import transaction error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat menyimpan data: ' . $e->getMessage(),
+            ], 500);
+        }
+
+        return response()->json([
+            'success'     => true,
+            'message'     => "Import selesai: {$imported} baris disimpan, {$skipped} kombinasi dilewati (sudah ada), {$overwritten} kombinasi ditimpa.",
+            'imported'    => $imported,
+            'skipped'     => $skipped,
+            'overwritten' => $overwritten,
+            'errors'      => $result['errors'],
+            'summary'     => $result['summary'],
+        ]);
+    }
+
+    // =========================================================================
+    // PRIVATE HELPERS
+    // =========================================================================
+
+    private function calculateSizePreview($recipes, string $intensityId): array
+    {
+        $sizes = Size::where('is_active', true)->orderBy('volume_ml')->get();
+
+        return $sizes->map(function ($size) use ($recipes, $intensityId) {
+            $intensityQty = IntensitySizeQuantity::getFor($intensityId, $size->id);
+
+            if (!$intensityQty) {
+                $baseTotalVolume = $recipes->sum(fn($r) => (float) $r->base_quantity);
+                return [
+                    'size'          => $size,
+                    'total_volume'  => $size->volume_ml,
+                    'is_calibrated' => false,
+                    'ingredients'   => $recipes->map(fn($recipe) => [
+                        'ingredient'        => $recipe->ingredient,
+                        'ingredient_type'   => $recipe->ingredient->category->ingredient_type ?? 'other',
+                        'original_quantity' => (float) $recipe->base_quantity,
+                        'scaled_quantity'   => $recipe->getFallbackScaledQty($baseTotalVolume, $size->volume_ml),
+                        'unit'              => $recipe->unit,
+                    ])->values(),
+                ];
+            }
+
+            $scaledMap = VariantRecipe::scaleCollection($recipes, $intensityQty);
+
+            return [
+                'size'             => $size,
+                'total_volume'     => $intensityQty->total_volume,
+                'is_calibrated'    => true,
+                'oil_quantity'     => $intensityQty->oil_quantity,
+                'alcohol_quantity' => $intensityQty->alcohol_quantity,
+                'other_quantity'   => $intensityQty->other_quantity ?? 0,
+                'ingredients'      => $recipes->map(function ($recipe, $idx) use ($scaledMap) {
+                    return [
+                        'ingredient'        => $recipe->ingredient,
+                        'ingredient_type'   => $recipe->ingredient->category->ingredient_type ?? 'other',
+                        'original_quantity' => (float) $recipe->base_quantity,
+                        'scaled_quantity'   => $scaledMap[$idx] ?? 0,
+                        'unit'              => $recipe->unit,
+                    ];
+                })->values(),
+            ];
+        })->toArray();
+    }
+
+    private function buildScaledIngredients($recipes, IntensitySizeQuantity $intensityQty): array
+    {
+        $scaledMap = VariantRecipe::scaleCollection($recipes, $intensityQty);
+
+        return $recipes->map(function ($recipe, $idx) use ($scaledMap) {
+            return [
+                'ingredient_id'   => $recipe->ingredient_id,
+                'name'            => $recipe->ingredient->name ?? '—',
+                'ingredient_type' => $recipe->ingredient->category->ingredient_type ?? 'other',
+                'scaled_quantity' => $scaledMap[$idx] ?? 0,
+                'unit'            => $recipe->unit,
+            ];
+        })->values()->toArray();
+    }
 
     private function generateSKU($variant, $intensity, $size): string
     {
-        // Format: {VARIANT_CODE}-{INTENSITY_CODE}-{VOLUME}
-        // Contoh:  AVE-EDP-50
         return sprintf(
             '%s-%s-%d',
             strtoupper(substr($variant->code, 0, 3)),
             strtoupper($intensity->code),
             $size->volume_ml
         );
+    }
+
+    // ─── Import: Parse Excel ──────────────────────────────────────────────────
+
+    private function parseExcel($file): array
+    {
+        $spreadsheet = IOFactory::load($file->getRealPath());
+        $sheet       = $spreadsheet->getSheetByName('Import Data') ?? $spreadsheet->getActiveSheet();
+
+        $rows     = [];
+        $maxRow   = $sheet->getHighestDataRow();
+        $startRow = 4; // baris 1-2: title/info, baris 3: header, baris 4+: data
+
+        for ($r = $startRow; $r <= $maxRow; $r++) {
+            $variantCode    = trim((string) $sheet->getCell("A{$r}")->getValue());
+            $intensityCode  = trim((string) $sheet->getCell("B{$r}")->getValue());
+            $ingredientCode = trim((string) $sheet->getCell("C{$r}")->getValue());
+            $baseQuantity   = $sheet->getCell("D{$r}")->getValue();
+            $unit           = trim((string) ($sheet->getCell("E{$r}")->getValue() ?? 'ml')) ?: 'ml';
+            $notes          = trim((string) ($sheet->getCell("F{$r}")->getValue() ?? ''));
+
+            // Skip baris kosong
+            if ($variantCode === '' && $intensityCode === '' && $ingredientCode === '') {
+                continue;
+            }
+
+            $rows[] = [
+                'row'             => $r,
+                'variant_code'    => $variantCode,
+                'intensity_code'  => $intensityCode,
+                'ingredient_code' => $ingredientCode,
+                'base_quantity'   => $baseQuantity,
+                'unit'            => $unit,
+                'notes'           => $notes,
+            ];
+        }
+
+        return $rows;
+    }
+
+    // ─── Import: Validate Rows ────────────────────────────────────────────────
+
+    private function validateRows(array $rows): array
+    {
+        $variants    = Variant::where('is_active', true)->pluck('id', 'code');
+        $intensities = Intensity::where('is_active', true)->pluck('id', 'code');
+        $ingredients = Ingredient::where('is_active', true)->pluck('id', 'code');
+
+        $validRows = [];
+        $errorRows = [];
+        $groupQty  = []; // key: variant_code|intensity_code → total_qty
+
+        foreach ($rows as $row) {
+            $rowErrors = [];
+
+            if (empty($row['variant_code'])) {
+                $rowErrors[] = 'variant_code wajib diisi';
+            } elseif (!$variants->has($row['variant_code'])) {
+                $rowErrors[] = "variant_code '{$row['variant_code']}' tidak ditemukan";
+            }
+
+            if (empty($row['intensity_code'])) {
+                $rowErrors[] = 'intensity_code wajib diisi';
+            } elseif (!$intensities->has($row['intensity_code'])) {
+                $rowErrors[] = "intensity_code '{$row['intensity_code']}' tidak ditemukan";
+            }
+
+            if (empty($row['ingredient_code'])) {
+                $rowErrors[] = 'ingredient_code wajib diisi';
+            } elseif (!$ingredients->has($row['ingredient_code'])) {
+                $rowErrors[] = "ingredient_code '{$row['ingredient_code']}' tidak ditemukan";
+            }
+
+            $qty = is_numeric($row['base_quantity']) ? (float) $row['base_quantity'] : null;
+            if ($qty === null) {
+                $rowErrors[] = 'base_quantity harus angka';
+            } elseif ($qty <= 0) {
+                $rowErrors[] = 'base_quantity harus > 0';
+            }
+
+            if (!empty($rowErrors)) {
+                $errorRows[] = [
+                    'row'    => $row['row'],
+                    'data'   => $row,
+                    'errors' => $rowErrors,
+                ];
+                continue;
+            }
+
+            $groupKey            = $row['variant_code'] . '|' . $row['intensity_code'];
+            $groupQty[$groupKey] = ($groupQty[$groupKey] ?? 0) + $qty;
+
+            $validRows[] = array_merge($row, [
+                'variant_id'    => $variants->get($row['variant_code']),
+                'intensity_id'  => $intensities->get($row['intensity_code']),
+                'ingredient_id' => $ingredients->get($row['ingredient_code']),
+                'base_quantity' => $qty,
+            ]);
+        }
+
+        // Warning jika total per kombinasi ≠ 30ml
+        $volumeWarnings = [];
+        foreach ($groupQty as $key => $total) {
+            if (abs($total - 30) > 0.5) {
+                [$vc, $ic] = explode('|', $key);
+                $volumeWarnings[] = "Kombinasi {$vc} + {$ic}: total base_quantity = {$total}ml (seharusnya 30ml)";
+            }
+        }
+
+        // Summary per kombinasi
+        $summary = [];
+        $grouped = collect($validRows)->groupBy(fn($r) => $r['variant_code'] . ' + ' . $r['intensity_code']);
+        foreach ($grouped as $combo => $items) {
+            $total     = $items->sum('base_quantity');
+            $summary[] = [
+                'combination'      => $combo,
+                'ingredient_count' => $items->count(),
+                'total_volume'     => round($total, 2),
+                'is_valid_volume'  => abs($total - 30) <= 0.5,
+            ];
+        }
+
+        return [
+            'valid_rows'      => $validRows,
+            'errors'          => $errorRows,
+            'volume_warnings' => $volumeWarnings,
+            'summary'         => $summary,
+            'total_rows'      => count($rows),
+            'valid_count'     => count($validRows),
+            'error_count'     => count($errorRows),
+        ];
+    }
+
+    // ─── Import: Fill Reference Sheet ─────────────────────────────────────────
+
+    private function fillReferenceSheet($sheet, $variants, $intensities, $ingredients): void
+    {
+        $headerStyle = [
+            'font' => ['bold' => true, 'size' => 9, 'color' => ['rgb' => '1E293B']],
+            'fill' => ['fillType' => 'solid', 'startColor' => ['rgb' => 'EEF2FF']],
+        ];
+        $dataStyle = [
+            'font'      => ['size' => 9],
+            'alignment' => ['vertical' => 'center'],
+        ];
+
+        $row = 2;
+
+        // Variant section
+        $sheet->setCellValue("A{$row}", 'KODE VARIANT');
+        $sheet->mergeCells("A{$row}:C{$row}");
+        $sheet->getStyle("A{$row}")->applyFromArray([
+            'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill'      => ['fillType' => 'solid', 'startColor' => ['rgb' => '7C3AED']],
+            'alignment' => ['horizontal' => 'center'],
+        ]);
+        $row++;
+
+        foreach (['A' => 'Kode', 'B' => 'Nama Variant', 'C' => 'Gender'] as $col => $label) {
+            $sheet->setCellValue("{$col}{$row}", $label);
+            $sheet->getStyle("{$col}{$row}")->applyFromArray($headerStyle);
+        }
+        $row++;
+
+        foreach ($variants as $v) {
+            $sheet->setCellValue("A{$row}", $v->code);
+            $sheet->setCellValue("B{$row}", $v->name);
+            $sheet->setCellValue("C{$row}", $v->gender);
+            $sheet->getStyle("A{$row}:C{$row}")->applyFromArray($dataStyle);
+            $row++;
+        }
+        $row++;
+
+        // Intensity section
+        $sheet->setCellValue("A{$row}", 'KODE INTENSITAS');
+        $sheet->mergeCells("A{$row}:C{$row}");
+        $sheet->getStyle("A{$row}")->applyFromArray([
+            'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill'      => ['fillType' => 'solid', 'startColor' => ['rgb' => '0369A1']],
+            'alignment' => ['horizontal' => 'center'],
+        ]);
+        $row++;
+
+        foreach (['A' => 'Kode', 'B' => 'Nama Intensitas', 'C' => 'Rasio (Oil:Alcohol)'] as $col => $label) {
+            $sheet->setCellValue("{$col}{$row}", $label);
+            $sheet->getStyle("{$col}{$row}")->applyFromArray($headerStyle);
+        }
+        $row++;
+
+        foreach ($intensities as $i) {
+            $sheet->setCellValue("A{$row}", $i->code);
+            $sheet->setCellValue("B{$row}", $i->name);
+            $sheet->setCellValue("C{$row}", "{$i->oil_ratio}:{$i->alcohol_ratio}");
+            $sheet->getStyle("A{$row}:C{$row}")->applyFromArray($dataStyle);
+            $row++;
+        }
+        $row++;
+
+        // Ingredient section
+        $sheet->setCellValue("A{$row}", 'KODE BAHAN BAKU');
+        $sheet->mergeCells("A{$row}:C{$row}");
+        $sheet->getStyle("A{$row}")->applyFromArray([
+            'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill'      => ['fillType' => 'solid', 'startColor' => ['rgb' => '065F46']],
+            'alignment' => ['horizontal' => 'center'],
+        ]);
+        $row++;
+
+        foreach (['A' => 'Kode', 'B' => 'Nama Bahan', 'C' => 'Satuan'] as $col => $label) {
+            $sheet->setCellValue("{$col}{$row}", $label);
+            $sheet->getStyle("{$col}{$row}")->applyFromArray($headerStyle);
+        }
+        $row++;
+
+        foreach ($ingredients as $ing) {
+            $sheet->setCellValue("A{$row}", $ing->code);
+            $sheet->setCellValue("B{$row}", $ing->name);
+            $sheet->setCellValue("C{$row}", $ing->unit);
+            $sheet->getStyle("A{$row}:C{$row}")->applyFromArray($dataStyle);
+            $row++;
+        }
     }
 }

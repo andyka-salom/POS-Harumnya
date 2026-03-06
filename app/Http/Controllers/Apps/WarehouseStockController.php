@@ -23,23 +23,27 @@ class WarehouseStockController extends Controller
                     'warehouse:id,name,code',
                     'ingredient:id,name,code,unit',
                 ])
-                ->when($request->search, fn ($q, $s) =>
-                    $q->whereHas('ingredient', fn ($q) =>
-                        $q->where('name', 'like', "%{$s}%")
-                          ->orWhere('code', 'like', "%{$s}%")
-                    )->orWhereHas('warehouse', fn ($q) =>
-                        $q->where('name', 'like', "%{$s}%")
-                    )
-                )
+                ->when($request->search, function ($q, $s) {
+                    // BUG FIX: tambahkan return agar scope benar-benar diterapkan
+                    $q->where(function ($q) use ($s) {
+                        $q->whereHas('ingredient', fn ($q) =>
+                            $q->where('name', 'like', "%{$s}%")
+                              ->orWhere('code', 'like', "%{$s}%")
+                        )->orWhereHas('warehouse', fn ($q) =>
+                            $q->where('name', 'like', "%{$s}%")
+                        );
+                    });
+                })
                 ->when($request->warehouse_id, fn ($q, $id) =>
                     $q->where('warehouse_id', $id)
                 )
                 ->when($request->stock_status, function ($q, $status) {
-                    match ($status) {
+                    // BUG FIX: match tanpa return → scope tidak diterapkan
+                    return match ($status) {
                         'low'  => $q->lowStock(),
                         'out'  => $q->outOfStock(),
                         'over' => $q->overStock(),
-                        default => null,
+                        default => $q,
                     };
                 })
                 ->latest('updated_at')
@@ -50,6 +54,7 @@ class WarehouseStockController extends Controller
                 'total_items'  => WarehouseIngredientStock::count(),
                 'low_stock'    => WarehouseIngredientStock::lowStock()->count(),
                 'out_of_stock' => WarehouseIngredientStock::outOfStock()->count(),
+                'over_stock'   => WarehouseIngredientStock::overStock()->count(), // BUG FIX: tambah over_stock
                 'total_value'  => (float) WarehouseIngredientStock::sum('total_value'),
             ];
         } else {
@@ -59,23 +64,25 @@ class WarehouseStockController extends Controller
                     'packagingMaterial:id,name,code,size_id',
                     'packagingMaterial.size:id,name',
                 ])
-                ->when($request->search, fn ($q, $s) =>
-                    $q->whereHas('packagingMaterial', fn ($q) =>
-                        $q->where('name', 'like', "%{$s}%")
-                          ->orWhere('code', 'like', "%{$s}%")
-                    )->orWhereHas('warehouse', fn ($q) =>
-                        $q->where('name', 'like', "%{$s}%")
-                    )
-                )
+                ->when($request->search, function ($q, $s) {
+                    $q->where(function ($q) use ($s) {
+                        $q->whereHas('packagingMaterial', fn ($q) =>
+                            $q->where('name', 'like', "%{$s}%")
+                              ->orWhere('code', 'like', "%{$s}%")
+                        )->orWhereHas('warehouse', fn ($q) =>
+                            $q->where('name', 'like', "%{$s}%")
+                        );
+                    });
+                })
                 ->when($request->warehouse_id, fn ($q, $id) =>
                     $q->where('warehouse_id', $id)
                 )
                 ->when($request->stock_status, function ($q, $status) {
-                    match ($status) {
+                    return match ($status) {
                         'low'  => $q->lowStock(),
                         'out'  => $q->outOfStock(),
                         'over' => $q->overStock(),
-                        default => null,
+                        default => $q,
                     };
                 })
                 ->latest('updated_at')
@@ -86,6 +93,7 @@ class WarehouseStockController extends Controller
                 'total_items'  => WarehousePackagingStock::count(),
                 'low_stock'    => WarehousePackagingStock::lowStock()->count(),
                 'out_of_stock' => WarehousePackagingStock::outOfStock()->count(),
+                'over_stock'   => WarehousePackagingStock::overStock()->count(), // BUG FIX: tambah over_stock
                 'total_value'  => (float) WarehousePackagingStock::sum('total_value'),
             ];
         }
@@ -96,10 +104,12 @@ class WarehouseStockController extends Controller
             'itemType' => $itemType,
             'summary'  => $summary,
             'overallSummary' => [
-                'total_ingredients'     => WarehouseIngredientStock::count(),
-                'total_packaging'       => WarehousePackagingStock::count(),
-                'low_stock_ingredients' => WarehouseIngredientStock::lowStock()->count(),
-                'low_stock_packaging'   => WarehousePackagingStock::lowStock()->count(),
+                'total_ingredients'      => WarehouseIngredientStock::count(),
+                'total_packaging'        => WarehousePackagingStock::count(),
+                'low_stock_ingredients'  => WarehouseIngredientStock::lowStock()->count(),
+                'low_stock_packaging'    => WarehousePackagingStock::lowStock()->count(),
+                'over_stock_ingredients' => WarehouseIngredientStock::overStock()->count(), // BUG FIX: tambah over_stock
+                'over_stock_packaging'   => WarehousePackagingStock::overStock()->count(),  // BUG FIX: tambah over_stock
             ],
             'filters' => $request->only(['search', 'warehouse_id', 'stock_status', 'item_type']),
         ]);
@@ -130,18 +140,15 @@ class WarehouseStockController extends Controller
             'item_type'    => 'required|in:ingredient,packaging',
             'warehouse_id' => 'required|exists:warehouses,id',
             'item_id'      => 'required|uuid',
-            // quantity bigInteger, SIGNED (bisa negatif via migration)
-            // tapi pada input awal stok tidak boleh negatif
             'quantity'     => 'required|numeric|min:0',
             'min_stock'    => 'nullable|integer|min:0',
             'max_stock'    => 'nullable|integer|min:0|gte:min_stock',
             'average_cost' => 'nullable|numeric|min:0',
         ]);
 
-        $qty  = (int) $validated['quantity'];
-        $cost = (float) ($validated['average_cost'] ?? 0);
-        $now  = now();
-        // users.id adalah bigInteger — tidak perlu cast ke string
+        $qty    = (int) $validated['quantity'];
+        $cost   = (float) ($validated['average_cost'] ?? 0);
+        $now    = now();
         $userId = auth()->id();
 
         if ($validated['item_type'] === 'ingredient') {

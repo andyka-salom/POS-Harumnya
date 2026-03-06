@@ -20,19 +20,13 @@ jobs:
           node-version: 20
           cache: npm
 
-      # 3️⃣ Install NPM Dependencies
-      - name: Install NPM Dependencies
-        run: npm ci
+      # 3️⃣ Install NPM Dependencies & Build Vite
+      - name: Install & Build Assets
+        run: |
+          npm ci
+          npm run build
 
-      # 4️⃣ Build Vite (Production)
-      - name: Build Assets (Vite)
-        run: npm run build
-
-      # 5️⃣ Debug build output
-      - name: Check Build Output
-        run: ls -la public/build
-
-      # 6️⃣ Fix permission & pull latest code di VPS
+      # 4️⃣ Fix permission & pull latest code di VPS
       - name: Pull latest code on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -43,14 +37,17 @@ jobs:
             set -e
             cd /var/www/POS-Harumnya
 
-            # Fix ownership semua folder yang butuh write access (termasuk public/build)
-            # Jalankan SEBELUM git reset & SEBELUM SCP upload
-            sudo chown -R $USER:$USER storage bootstrap/cache public/build public
+            # FIX UTAMA: Ubah kepemilikan SELURUH direktori ke user SSH (misal: ubuntu/deployer)
+            # Ini agar folder .git/ bisa ditulisi saat 'git fetch'
+            sudo chown -R $USER:$USER .
+
+            # Beritahu Git bahwa direktori ini aman (mencegah error 'dubious ownership')
+            git config --global --add safe.directory /var/www/POS-Harumnya
 
             git fetch origin main
             git reset --hard origin/main
 
-      # 7️⃣ Upload build folder to VPS
+      # 5️⃣ Upload build folder to VPS
       - name: Upload build folder to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -61,7 +58,7 @@ jobs:
           target: "/var/www/POS-Harumnya"
           overwrite: true
 
-      # 8️⃣ Finalize deployment
+      # 6️⃣ Finalize deployment
       - name: Install Composer & Optimize
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -81,13 +78,10 @@ jobs:
             php artisan route:cache
             php artisan view:cache
 
-            # Kembalikan ownership ke www-data setelah semua selesai
-            sudo chown -R www-data:www-data storage bootstrap/cache public/build public
+            # KEMBALIKAN PERMISSION: Web server (www-data) butuh akses tulis ke folder tertentu
+            sudo chown -R www-data:www-data storage bootstrap/cache public/build
             sudo chmod -R 775 storage bootstrap/cache public/build
 
-            # Restart services
+            # Restart services (Gunakan reload agar tidak ada downtime)
             sudo systemctl restart php8.4-fpm
             sudo systemctl reload nginx
-
-            # Verify build uploaded correctly
-            ls -la public/build

@@ -3,8 +3,13 @@
  * Shared form section components for Create and Edit pages.
  *
  * Product structure: Variant (perfume name) × Intensity (EDT/EDP/EXT) × Size (ml)
+ *
+ * FIXES:
+ *  - Dropdown SearchableSelect: portal ke document.body agar tidak terpotong overflow-hidden
+ *  - EmptyState, Row, SectionCard, dll. dipertahankan
  */
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
     IconPlus,
     IconTrash,
@@ -19,40 +24,103 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const optionLabel = (o) =>
-    o.volume_ml
-        ? `${o.name} (${o.volume_ml}ml)`
-        : o.code
-        ? `${o.name} (${o.code})`
-        : o.name;
+const optionLabel = (o) => {
+    if (!o) return "";
+    if (o.volume_ml) return `${o.name} (${o.volume_ml}ml)`;
+    if (o.code)      return `${o.name} (${o.code})`;
+    return o.name ?? "";
+};
+
+// UUID comparison — normalise ke string lowercase agar tidak gagal karena tipe/case
+const sameId = (a, b) => {
+    if (a === null || a === undefined || b === null || b === undefined) return false;
+    return String(a).toLowerCase().trim() === String(b).toLowerCase().trim();
+};
 
 // ─── SearchableSelect ─────────────────────────────────────────────────────────
+// FIX: Dropdown dirender via React Portal ke document.body agar tidak terpotong
+// oleh overflow-hidden / overflow-y-auto pada parent card manapun.
 
-function SearchableSelect({ label, value, onChange, options = [], nullable = true, placeholder = "Cari..." }) {
+function SearchableSelect({
+    label,
+    value,
+    onChange,
+    options = [],
+    nullable = true,
+    placeholder = "Cari...",
+}) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
-    const containerRef = useRef(null);
+    const [dropdownStyle, setDropdownStyle] = useState({});
+    const buttonRef = useRef(null);
     const inputRef = useRef(null);
+    const dropdownRef = useRef(null);
 
-    const selected = options.find((o) => o.id === value) ?? null;
+    const selected = options.find((o) => sameId(o.id, value)) ?? null;
     const filtered = query.trim()
-        ? options.filter((o) => optionLabel(o).toLowerCase().includes(query.toLowerCase()))
+        ? options.filter((o) =>
+              optionLabel(o).toLowerCase().includes(query.toLowerCase())
+          )
         : options;
 
+    // Hitung posisi dropdown — position:fixed pakai koordinat VIEWPORT (tanpa scroll offset)
+    const updateDropdownPosition = useCallback(() => {
+        if (!buttonRef.current) return;
+        const rect = buttonRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        const dropdownHeight = 260;
+
+        const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+        setDropdownStyle({
+            position: "fixed",
+            // FIX: fixed positioning pakai viewport coords, TANPA scrollX/scrollY
+            left: rect.left,
+            width: Math.max(rect.width, 220),
+            zIndex: 9999,
+            ...(openUpward
+                ? { bottom: window.innerHeight - rect.top, top: "auto" }
+                : { top: rect.bottom + 4, bottom: "auto" }),
+        });
+    }, []);
+
+    // Tutup dropdown saat klik di luar
     useEffect(() => {
+        if (!open) return;
         const handler = (e) => {
-            if (containerRef.current && !containerRef.current.contains(e.target)) {
+            if (
+                buttonRef.current &&
+                !buttonRef.current.contains(e.target) &&
+                dropdownRef.current &&
+                !dropdownRef.current.contains(e.target)
+            ) {
                 setOpen(false);
                 setQuery("");
             }
         };
         document.addEventListener("mousedown", handler);
         return () => document.removeEventListener("mousedown", handler);
-    }, []);
+    }, [open]);
+
+    // Update posisi saat scroll atau resize
+    useEffect(() => {
+        if (!open) return;
+        const handler = () => updateDropdownPosition();
+        window.addEventListener("scroll", handler, true);
+        window.addEventListener("resize", handler);
+        return () => {
+            window.removeEventListener("scroll", handler, true);
+            window.removeEventListener("resize", handler);
+        };
+    }, [open, updateDropdownPosition]);
 
     useEffect(() => {
-        if (open) inputRef.current?.focus();
-    }, [open]);
+        if (open) {
+            updateDropdownPosition();
+            setTimeout(() => inputRef.current?.focus(), 10);
+        }
+    }, [open, updateDropdownPosition]);
 
     const select = useCallback(
         (id) => {
@@ -72,8 +140,92 @@ function SearchableSelect({ label, value, onChange, options = [], nullable = tru
         [onChange]
     );
 
+    const dropdown = open
+        ? createPortal(
+              <div
+                  ref={dropdownRef}
+                  style={dropdownStyle}
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl overflow-hidden"
+              >
+                  {/* Search input */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                      <IconSearch
+                          size={12}
+                          className="text-slate-400 flex-shrink-0"
+                      />
+                      <input
+                          ref={inputRef}
+                          type="text"
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                          placeholder={placeholder}
+                          className="flex-1 text-xs bg-transparent outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
+                      />
+                      {query && (
+                          <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setQuery("");
+                              }}
+                              className="text-slate-300 hover:text-slate-500"
+                          >
+                              <IconX size={10} />
+                          </button>
+                      )}
+                  </div>
+                  {/* Options */}
+                  <ul className="max-h-48 overflow-y-auto py-1">
+                      {nullable && (
+                          <li>
+                              <button
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      select(null);
+                                  }}
+                                  className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                                      value === null
+                                          ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
+                                          : "text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 italic"
+                                  }`}
+                              >
+                                  Semua
+                              </button>
+                          </li>
+                      )}
+                      {filtered.length === 0 ? (
+                          <li className="px-3 py-4 text-xs text-center text-slate-400">
+                              Tidak ditemukan &quot;{query}&quot;
+                          </li>
+                      ) : (
+                          filtered.map((o) => (
+                              <li key={o.id}>
+                                  <button
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          select(o.id);
+                                      }}
+                                      className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                                          sameId(value, o.id)
+                                              ? "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold"
+                                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                      }`}
+                                  >
+                                      {optionLabel(o)}
+                                  </button>
+                              </li>
+                          ))
+                      )}
+                  </ul>
+              </div>,
+              document.body
+          )
+        : null;
+
     return (
-        <div ref={containerRef} className="relative">
+        <div className="relative">
             {label && (
                 <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">
                     {label}
@@ -81,6 +233,7 @@ function SearchableSelect({ label, value, onChange, options = [], nullable = tru
             )}
 
             <button
+                ref={buttonRef}
                 type="button"
                 onClick={() => setOpen((v) => !v)}
                 className={`w-full flex items-center justify-between gap-2 text-sm rounded-lg border py-2 px-3 text-left transition-all ${
@@ -92,11 +245,15 @@ function SearchableSelect({ label, value, onChange, options = [], nullable = tru
                 <span
                     className={
                         selected
-                            ? "text-slate-800 dark:text-slate-100 font-medium"
+                            ? "text-slate-800 dark:text-slate-100 font-medium truncate"
                             : "text-slate-400 dark:text-slate-600"
                     }
                 >
-                    {selected ? optionLabel(selected) : nullable ? "Semua" : placeholder}
+                    {selected
+                        ? optionLabel(selected)
+                        : nullable
+                        ? "Semua"
+                        : placeholder}
                 </span>
                 <span className="flex items-center gap-1 flex-shrink-0">
                     {selected && nullable && (
@@ -110,80 +267,28 @@ function SearchableSelect({ label, value, onChange, options = [], nullable = tru
                     )}
                     <IconChevronDown
                         size={13}
-                        className={`text-slate-400 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+                        className={`text-slate-400 transition-transform duration-150 ${
+                            open ? "rotate-180" : ""
+                        }`}
                     />
                 </span>
             </button>
 
-            {open && (
-                <div className="absolute z-50 mt-1 w-full min-w-[220px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden">
-                    <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
-                        <IconSearch size={12} className="text-slate-400 flex-shrink-0" />
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder={placeholder}
-                            className="flex-1 text-xs bg-transparent outline-none text-slate-700 dark:text-slate-300 placeholder-slate-400"
-                        />
-                        {query && (
-                            <button
-                                type="button"
-                                onClick={() => setQuery("")}
-                                className="text-slate-300 hover:text-slate-500"
-                            >
-                                <IconX size={10} />
-                            </button>
-                        )}
-                    </div>
-                    <ul className="max-h-48 overflow-y-auto py-1">
-                        {nullable && (
-                            <li>
-                                <button
-                                    type="button"
-                                    onClick={() => select(null)}
-                                    className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                                        value === null
-                                            ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold"
-                                            : "text-slate-400 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 italic"
-                                    }`}
-                                >
-                                    Semua
-                                </button>
-                            </li>
-                        )}
-                        {filtered.length === 0 ? (
-                            <li className="px-3 py-4 text-xs text-center text-slate-400">
-                                Tidak ditemukan &quot;{query}&quot;
-                            </li>
-                        ) : (
-                            filtered.map((o) => (
-                                <li key={o.id}>
-                                    <button
-                                        type="button"
-                                        onClick={() => select(o.id)}
-                                        className={`w-full text-left px-3 py-2 text-xs transition-colors ${
-                                            value === o.id
-                                                ? "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-semibold"
-                                                : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                        }`}
-                                    >
-                                        {optionLabel(o)}
-                                    </button>
-                                </li>
-                            ))
-                        )}
-                    </ul>
-                </div>
-            )}
+            {dropdown}
         </div>
     );
 }
 
 // ─── Select ───────────────────────────────────────────────────────────────────
 
-function Select({ label, value, onChange, options = [], nullable = true, className = "" }) {
+function Select({
+    label,
+    value,
+    onChange,
+    options = [],
+    nullable = true,
+    className = "",
+}) {
     return (
         <div className={className}>
             {label && (
@@ -193,7 +298,9 @@ function Select({ label, value, onChange, options = [], nullable = true, classNa
             )}
             <select
                 value={value ?? ""}
-                onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+                onChange={(e) =>
+                    onChange(e.target.value === "" ? null : e.target.value)
+                }
                 className="w-full text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-slate-300 dark:focus:ring-slate-600 focus:border-transparent py-2 px-3 transition-all"
             >
                 {nullable && <option value="">Semua</option>}
@@ -209,7 +316,14 @@ function Select({ label, value, onChange, options = [], nullable = true, classNa
 
 // ─── NumberInput ──────────────────────────────────────────────────────────────
 
-function NumberInput({ label, value, onChange, min = 0, placeholder = "0" }) {
+function NumberInput({
+    label,
+    value,
+    onChange,
+    min = 0,
+    placeholder = "0",
+    error,
+}) {
     return (
         <div>
             {label && (
@@ -221,10 +335,21 @@ function NumberInput({ label, value, onChange, min = 0, placeholder = "0" }) {
                 type="number"
                 min={min}
                 value={value ?? ""}
-                onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+                onChange={(e) =>
+                    onChange(
+                        e.target.value === "" ? null : Number(e.target.value)
+                    )
+                }
                 placeholder={placeholder}
-                className="w-full text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-slate-300 dark:focus:ring-slate-600 focus:border-transparent py-2 px-3 transition-all"
+                className={`w-full text-sm rounded-lg border bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:ring-2 focus:border-transparent py-2 px-3 transition-all ${
+                    error
+                        ? "border-red-400 dark:border-red-500 focus:ring-red-200 dark:focus:ring-red-900"
+                        : "border-slate-200 dark:border-slate-700 focus:ring-slate-300 dark:focus:ring-slate-600"
+                }`}
             />
+            {error && (
+                <p className="mt-1 text-[11px] text-red-500">{error}</p>
+            )}
         </div>
     );
 }
@@ -252,16 +377,25 @@ function TextInput({ label, value, onChange, placeholder = "" }) {
 
 // ─── SectionCard ─────────────────────────────────────────────────────────────
 
-function SectionCard({ title, icon, description, children, onAdd, addLabel = "Tambah" }) {
+function SectionCard({
+    title,
+    icon,
+    description,
+    children,
+    onAdd,
+    addLabel = "Tambah",
+}) {
     return (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-visible">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
                 <div>
                     <h3 className="font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2 text-sm">
                         {icon} {title}
                     </h3>
                     {description && (
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{description}</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                            {description}
+                        </p>
                     )}
                 </div>
                 {onAdd && (
@@ -274,7 +408,8 @@ function SectionCard({ title, icon, description, children, onAdd, addLabel = "Ta
                     </button>
                 )}
             </div>
-            <div className="p-5">{children}</div>
+            {/* FIX: overflow-visible agar dropdown portal tidak di-clip */}
+            <div className="p-5 overflow-visible">{children}</div>
         </div>
     );
 }
@@ -296,7 +431,14 @@ function RemoveBtn({ onClick }) {
 
 // ─── DimensionFilters ─────────────────────────────────────────────────────────
 
-function DimensionFilters({ item, index, onUpdate, variants, intensities, sizes }) {
+function DimensionFilters({
+    item,
+    index,
+    onUpdate,
+    variants,
+    intensities,
+    sizes,
+}) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <SearchableSelect
@@ -327,7 +469,7 @@ function DimensionFilters({ item, index, onUpdate, variants, intensities, sizes 
 function Row({ children, className = "" }) {
     return (
         <div
-            className={`p-4 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700/60 space-y-3 ${className}`}
+            className={`p-4 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700/60 space-y-3 overflow-visible ${className}`}
         >
             {children}
         </div>
@@ -338,7 +480,9 @@ function Row({ children, className = "" }) {
 
 function EmptyState({ text }) {
     return (
-        <p className="text-xs text-slate-400 dark:text-slate-600 italic text-center py-4">{text}</p>
+        <p className="text-xs text-slate-400 dark:text-slate-600 italic text-center py-4">
+            {text}
+        </p>
     );
 }
 
@@ -348,6 +492,9 @@ function PoolItems({ pools, onChange }) {
     const def = {
         label: "",
         product_id: null,
+        variant_id: null,
+        intensity_id: null,
+        size_id: null,
         fixed_price: 0,
         probability: null,
         image_url: null,
@@ -355,7 +502,8 @@ function PoolItems({ pools, onChange }) {
         sort_order: 0,
     };
 
-    const add = () => onChange([...pools, { ...def, sort_order: pools.length }]);
+    const add = () =>
+        onChange([...pools, { ...def, sort_order: pools.length }]);
     const remove = (i) => onChange(pools.filter((_, idx) => idx !== i));
     const update = (i, key, val) =>
         onChange(pools.map((it, idx) => (idx === i ? { ...it, [key]: val } : it)));
@@ -374,7 +522,9 @@ function PoolItems({ pools, onChange }) {
                     <IconPlus size={11} /> Tambah
                 </button>
             </div>
-            {pools.length === 0 && <EmptyState text="Belum ada pilihan pool." />}
+            {pools.length === 0 && (
+                <EmptyState text="Belum ada pilihan pool." />
+            )}
             {pools.map((pool, i) => (
                 <div
                     key={i}
@@ -410,18 +560,26 @@ function PoolItems({ pools, onChange }) {
 
 // ─── ApplicabilitiesSection ───────────────────────────────────────────────────
 
-export function ApplicabilitiesSection({ items, onChange, variants, intensities, sizes }) {
+export function ApplicabilitiesSection({
+    items,
+    onChange,
+    variants,
+    intensities,
+    sizes,
+}) {
     const def = { variant_id: null, intensity_id: null, size_id: null };
     const add = () => onChange([...items, { ...def }]);
     const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
     const update = (i, key, val) =>
-        onChange(items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it)));
+        onChange(
+            items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it))
+        );
 
     return (
         <SectionCard
             title="Berlaku untuk Produk"
             icon={<IconPackage size={15} className="text-slate-400" />}
-            description="Kosong = berlaku semua produk. Pilih Size untuk filter P50/P10."
+            description="Kosong = berlaku semua produk. Tambah filter untuk membatasi produk tertentu."
             onAdd={add}
             addLabel="Tambah Filter"
         >
@@ -454,7 +612,13 @@ export function ApplicabilitiesSection({ items, onChange, variants, intensities,
 
 // ─── RequirementsSection ──────────────────────────────────────────────────────
 
-export function RequirementsSection({ items, onChange, variants, intensities, sizes }) {
+export function RequirementsSection({
+    items,
+    onChange,
+    variants,
+    intensities,
+    sizes,
+}) {
     const def = {
         variant_id: null,
         intensity_id: null,
@@ -466,18 +630,20 @@ export function RequirementsSection({ items, onChange, variants, intensities, si
     const add = () => onChange([...items, { ...def }]);
     const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
     const update = (i, key, val) =>
-        onChange(items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it)));
+        onChange(
+            items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it))
+        );
 
     return (
         <SectionCard
-            title="Syarat Pembelian"
+            title="Syarat Pembelian Produk"
             icon={<IconListCheck size={15} className="text-slate-400" />}
             description="Produk yang harus ada di cart. Group Key sama = kondisi OR."
             onAdd={add}
             addLabel="Tambah Syarat"
         >
             {items.length === 0 ? (
-                <EmptyState text="Tidak ada syarat — diskon berlaku tanpa syarat produk." />
+                <EmptyState text="Tidak ada syarat produk — diskon berlaku tanpa syarat produk spesifik." />
             ) : (
                 <div className="space-y-2">
                     {items.map((item, i) => (
@@ -494,7 +660,9 @@ export function RequirementsSection({ items, onChange, variants, intensities, si
                                 <NumberInput
                                     label="Min Qty"
                                     value={item.required_quantity}
-                                    onChange={(v) => update(i, "required_quantity", v)}
+                                    onChange={(v) =>
+                                        update(i, "required_quantity", v)
+                                    }
                                     min={1}
                                     placeholder="1"
                                 />
@@ -504,18 +672,30 @@ export function RequirementsSection({ items, onChange, variants, intensities, si
                                     </label>
                                     <select
                                         value={item.matching_mode ?? "all"}
-                                        onChange={(e) => update(i, "matching_mode", e.target.value)}
+                                        onChange={(e) =>
+                                            update(
+                                                i,
+                                                "matching_mode",
+                                                e.target.value
+                                            )
+                                        }
                                         className="w-full text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-slate-300 dark:focus:ring-slate-600 focus:border-transparent py-2 px-3 transition-all"
                                     >
-                                        <option value="all">AND — semua</option>
-                                        <option value="any">ANY — salah satu</option>
+                                        <option value="all">
+                                            AND — semua
+                                        </option>
+                                        <option value="any">
+                                            ANY — salah satu
+                                        </option>
                                     </select>
                                 </div>
                                 <div className="flex gap-2 items-end">
                                     <TextInput
                                         label="Group Key (OR)"
                                         value={item.group_key}
-                                        onChange={(v) => update(i, "group_key", v || null)}
+                                        onChange={(v) =>
+                                            update(i, "group_key", v || null)
+                                        }
                                         placeholder="mis: grp_a"
                                     />
                                     <RemoveBtn onClick={() => remove(i)} />
@@ -541,7 +721,13 @@ export function RequirementsSection({ items, onChange, variants, intensities, si
 
 // ─── RewardsSection ───────────────────────────────────────────────────────────
 
-export function RewardsSection({ items, onChange, variants, intensities, sizes }) {
+export function RewardsSection({
+    items,
+    onChange,
+    variants,
+    intensities,
+    sizes,
+}) {
     const def = {
         variant_id: null,
         intensity_id: null,
@@ -558,7 +744,9 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
     const add = () => onChange([...items, { ...def }]);
     const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
     const update = (i, key, val) =>
-        onChange(items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it)));
+        onChange(
+            items.map((it, idx) => (idx === i ? { ...it, [key]: val } : it))
+        );
 
     return (
         <SectionCard
@@ -587,20 +775,26 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
                                 <NumberInput
                                     label="Qty Reward"
                                     value={item.reward_quantity}
-                                    onChange={(v) => update(i, "reward_quantity", v)}
+                                    onChange={(v) =>
+                                        update(i, "reward_quantity", v)
+                                    }
                                     min={1}
                                 />
                                 <NumberInput
                                     label="Diskon %"
                                     value={item.discount_percentage}
-                                    onChange={(v) => update(i, "discount_percentage", v)}
+                                    onChange={(v) =>
+                                        update(i, "discount_percentage", v)
+                                    }
                                     min={0}
                                     placeholder="100"
                                 />
                                 <NumberInput
                                     label="Harga Override (Rp)"
                                     value={item.fixed_price}
-                                    onChange={(v) => update(i, "fixed_price", v)}
+                                    onChange={(v) =>
+                                        update(i, "fixed_price", v)
+                                    }
                                     min={0}
                                     placeholder="—"
                                 />
@@ -617,7 +811,13 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
                                     <input
                                         type="checkbox"
                                         checked={item.customer_can_choose}
-                                        onChange={(e) => update(i, "customer_can_choose", e.target.checked)}
+                                        onChange={(e) =>
+                                            update(
+                                                i,
+                                                "customer_can_choose",
+                                                e.target.checked
+                                            )
+                                        }
                                         className="rounded border-slate-300 text-slate-700 focus:ring-slate-400"
                                     />
                                     Pelanggan pilih variant
@@ -626,7 +826,9 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
                                     <input
                                         type="checkbox"
                                         checked={item.is_pool}
-                                        onChange={(e) => update(i, "is_pool", e.target.checked)}
+                                        onChange={(e) =>
+                                            update(i, "is_pool", e.target.checked)
+                                        }
                                         className="rounded border-slate-300 text-slate-700 focus:ring-slate-400"
                                     />
                                     Gunakan Pool (Plinko)
@@ -636,7 +838,9 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
                                         <NumberInput
                                             label="Max Pilihan"
                                             value={item.max_choices}
-                                            onChange={(v) => update(i, "max_choices", v)}
+                                            onChange={(v) =>
+                                                update(i, "max_choices", v)
+                                            }
                                             min={1}
                                         />
                                     </div>
@@ -649,7 +853,9 @@ export function RewardsSection({ items, onChange, variants, intensities, sizes }
                             {item.is_pool && (
                                 <PoolItems
                                     pools={item.pools ?? []}
-                                    onChange={(pools) => update(i, "pools", pools)}
+                                    onChange={(pools) =>
+                                        update(i, "pools", pools)
+                                    }
                                 />
                             )}
                         </Row>

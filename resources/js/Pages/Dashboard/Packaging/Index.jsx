@@ -4,7 +4,7 @@ import { Head, Link, router, useForm } from "@inertiajs/react";
 import {
     IconCirclePlus, IconPencil, IconTrash, IconPackage,
     IconPhoto, IconCheck, IconX, IconLock,
-    IconTrendingUp, IconTrendingDown, IconAlertTriangle, IconFilter,
+    IconTrendingUp, IconTrendingDown, IconAlertTriangle, IconFilter, IconGift,
 } from "@tabler/icons-react";
 import Search from "@/Components/Dashboard/Search";
 import Pagination from "@/Components/Dashboard/Pagination";
@@ -13,7 +13,6 @@ import toast from "react-hot-toast";
 
 const fmt = (v = 0) => Number(v || 0).toLocaleString("id-ID");
 
-// ─── Custom Select ─────────────────────────────────────────────────────────────
 function Select({ value, onChange, children, className = "" }) {
     return (
         <div className="relative">
@@ -33,7 +32,6 @@ function Select({ value, onChange, children, className = "" }) {
     );
 }
 
-// ─── Delete Confirm Modal ──────────────────────────────────────────────────────
 function DeleteModal({ show, title, message, onConfirm, onClose, loading }) {
     if (!show) return null;
     return (
@@ -70,7 +68,6 @@ function DeleteModal({ show, title, message, onConfirm, onClose, loading }) {
     );
 }
 
-// ─── Category Modal ────────────────────────────────────────────────────────────
 function CategoryModal({ show, onClose, category = null }) {
     const isEdit = !!category;
 
@@ -82,7 +79,6 @@ function CategoryModal({ show, onClose, category = null }) {
         is_active:   true,
     });
 
-    // FIX: re-populate form setiap kali modal dibuka dengan data berbeda
     useEffect(() => {
         if (show) {
             if (category) {
@@ -124,10 +120,7 @@ function CategoryModal({ show, onClose, category = null }) {
                     <h3 className="text-lg font-bold dark:text-white">
                         {isEdit ? "Edit Kategori" : "Tambah Kategori"}
                     </h3>
-                    <button
-                        onClick={onClose}
-                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                    >
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
                         <IconX size={20} />
                     </button>
                 </div>
@@ -198,9 +191,7 @@ function CategoryModal({ show, onClose, category = null }) {
                             disabled={processing}
                             className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2"
                         >
-                            {processing && (
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            )}
+                            {processing && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                             Simpan
                         </button>
                     </div>
@@ -210,12 +201,54 @@ function CategoryModal({ show, onClose, category = null }) {
     );
 }
 
+// ─── Harga Jual Cell ───────────────────────────────────────────────────────────
+function SellingPriceCell({ item }) {
+    if (item.is_free) {
+        return (
+            <div>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold">
+                    <IconGift size={11} /> Gratis
+                </span>
+                {item.free_condition_note && (
+                    <p className="text-[10px] text-slate-400 mt-0.5 max-w-[120px] truncate" title={item.free_condition_note}>
+                        {item.free_condition_note}
+                    </p>
+                )}
+            </div>
+        );
+    }
+    return (
+        <span className="text-sm font-semibold text-slate-800 dark:text-white">
+            {item.selling_price > 0 ? `Rp ${fmt(item.selling_price)}` : "—"}
+        </span>
+    );
+}
+
 // ─── Margin Badge ──────────────────────────────────────────────────────────────
-function MarginBadge({ sellingPrice, avgCost }) {
-    if (!sellingPrice || !avgCost) return <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>;
-    const margin = ((sellingPrice - avgCost) / sellingPrice) * 100;
-    const profit = sellingPrice - Math.round(avgCost);
+function MarginBadge({ item }) {
+    const avgCost = parseFloat(item.average_cost || 0);
+
+    // Kemasan gratis → tampilkan biaya subsidi
+    if (item.is_free) {
+        if (avgCost <= 0) return <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>;
+        return (
+            <div className="text-right">
+                <span className="text-sm font-bold flex items-center justify-end gap-1 text-amber-500">
+                    <IconGift size={13} /> subsidi
+                </span>
+                <span className="text-[10px] text-amber-400">
+                    −{fmt(Math.round(avgCost))}/unit
+                </span>
+            </div>
+        );
+    }
+
+    if (!item.selling_price || !avgCost) return <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>;
+
+    const margin = ((item.selling_price - avgCost) / item.selling_price) * 100;
+    const profit = item.selling_price - Math.round(avgCost);
     const isGood = margin >= 0;
+
     return (
         <div className="text-right">
             <span className={`text-sm font-bold flex items-center justify-end gap-1 ${isGood ? "text-teal-600" : "text-red-500"}`}>
@@ -242,7 +275,6 @@ export default function Index({ materials, categories, filters }) {
         const { type, item } = deleteModal;
         setDeleteModal(prev => ({ ...prev, loading: true }));
 
-        // FIX: gunakan router.delete (bukan Button type="delete") agar response Inertia diproses
         router.delete(
             route(type === "category" ? "packaging.categories.destroy" : "packaging.destroy", item.id),
             {
@@ -299,8 +331,8 @@ export default function Index({ materials, categories, filters }) {
             {/* Tabs */}
             <div className="flex gap-6 mb-6 border-b border-slate-200 dark:border-slate-800">
                 {[
-                    { key: "materials",  label: "Daftar Kemasan",  count: materials.total },
-                    { key: "categories", label: "Kategori",         count: categories.length },
+                    { key: "materials",  label: "Daftar Kemasan", count: materials.total },
+                    { key: "categories", label: "Kategori",        count: categories.length },
                 ].map(tab => (
                     <button
                         key={tab.key}
@@ -362,13 +394,13 @@ export default function Index({ materials, categories, filters }) {
                                         <th className="px-5 py-3.5">Kategori</th>
                                         <th className="px-5 py-3.5">Satuan</th>
                                         <th className="px-5 py-3.5 text-right">Harga Beli</th>
-                                        <th className="px-5 py-3.5 text-right">Harga Jual</th>
+                                        <th className="px-5 py-3.5">Harga Jual</th>
                                         <th className="px-5 py-3.5 text-right">
                                             <span className="flex items-center justify-end gap-1">
                                                 <IconLock size={11} /> HPP (WAC)
                                             </span>
                                         </th>
-                                        <th className="px-5 py-3.5 text-right">Margin</th>
+                                        <th className="px-5 py-3.5 text-right">Margin / Subsidi</th>
                                         <th className="px-5 py-3.5 text-center">Addon</th>
                                         <th className="px-5 py-3.5 text-right">Aksi</th>
                                     </tr>
@@ -419,10 +451,8 @@ export default function Index({ materials, categories, filters }) {
                                                     {item.purchase_price > 0 ? `Rp ${fmt(item.purchase_price)}` : "—"}
                                                 </span>
                                             </td>
-                                            <td className="px-5 py-3.5 text-right">
-                                                <span className="text-sm font-semibold text-slate-800 dark:text-white">
-                                                    {item.selling_price > 0 ? `Rp ${fmt(item.selling_price)}` : "—"}
-                                                </span>
+                                            <td className="px-5 py-3.5">
+                                                <SellingPriceCell item={item} />
                                             </td>
                                             <td className="px-5 py-3.5 text-right">
                                                 {parseFloat(item.average_cost) > 0 ? (
@@ -434,10 +464,7 @@ export default function Index({ materials, categories, filters }) {
                                                 )}
                                             </td>
                                             <td className="px-5 py-3.5">
-                                                <MarginBadge
-                                                    sellingPrice={item.selling_price}
-                                                    avgCost={parseFloat(item.average_cost)}
-                                                />
+                                                <MarginBadge item={item} />
                                             </td>
                                             <td className="px-5 py-3.5 text-center">
                                                 {item.is_available_as_addon
@@ -513,14 +540,12 @@ export default function Index({ materials, categories, filters }) {
                                                 <button
                                                     onClick={() => setCatModal({ show: true, data: cat })}
                                                     className="p-1.5 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 text-amber-600 rounded-lg transition-colors"
-                                                    title="Edit"
                                                 >
                                                     <IconPencil size={15} />
                                                 </button>
                                                 <button
                                                     onClick={() => confirmDelete("category", cat)}
                                                     className="p-1.5 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 text-red-500 rounded-lg transition-colors"
-                                                    title="Hapus"
                                                 >
                                                     <IconTrash size={15} />
                                                 </button>
@@ -551,7 +576,6 @@ export default function Index({ materials, categories, filters }) {
                 </div>
             )}
 
-            {/* Modals */}
             <CategoryModal
                 show={catModal.show}
                 onClose={() => setCatModal({ show: false, data: null })}

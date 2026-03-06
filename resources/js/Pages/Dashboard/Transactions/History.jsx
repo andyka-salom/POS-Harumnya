@@ -4,16 +4,25 @@ import DashboardLayout from "@/Layouts/DashboardLayout";
 import Pagination from "@/Components/Dashboard/Pagination";
 import {
     IconDatabaseOff, IconSearch, IconHistory, IconReceipt,
-    IconPrinter, IconFilter, IconX, IconTrendingUp,
+    IconPrinter, IconFilter, IconX, IconTrendingUp, IconCalendar,
+    IconRefresh,
 } from "@tabler/icons-react";
 
-// Field filter sesuai kolom sales table
-const defaultFilters = { sale_number: "", start_date: "", end_date: "", status: "" };
+const defaultFilters = { q: "", date_from: "", date_to: "", status: "" };
 
 const fmt = (v = 0) =>
     Number(v || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 });
 
-// Status sesuai enum sales.status: completed|cancelled|refunded|pending|draft
+// Format sold_at (timestamp) menjadi tanggal & waktu
+const fmtSoldAt = (soldAt) => {
+    if (!soldAt) return { date: "-", time: "" };
+    const d = new Date(soldAt);
+    return {
+        date: d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }),
+        time: d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+    };
+};
+
 const STATUS_BADGE = {
     completed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400",
     cancelled:  "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400",
@@ -22,11 +31,14 @@ const STATUS_BADGE = {
     draft:      "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
 };
 
-// Controller history() mengembalikan $sales (paginated Sale collection)
-// dengan eager load: cashier (User), customer (Customer), saleItems (count)
+const STATUS_LABEL = {
+    completed: "Selesai", cancelled: "Dibatalkan",
+    refunded: "Refund", pending: "Pending", draft: "Draft",
+};
+
 export default function History({ sales, filters, summary = {} }) {
-    const [filterData, setFilterData] = useState({ ...defaultFilters, ...filters });
-    const [showFilters, setShowFilters] = useState(false);
+    const [filterData,   setFilterData]   = useState({ ...defaultFilters, ...filters });
+    const [showFilters,  setShowFilters]  = useState(false);
 
     useEffect(() => { setFilterData({ ...defaultFilters, ...filters }); }, [filters]);
 
@@ -43,22 +55,25 @@ export default function History({ sales, filters, summary = {} }) {
         router.get(route("transactions.history"), defaultFilters, { preserveScroll: true, preserveState: true, replace: true });
     };
 
-    const rows        = sales?.data          ?? [];
-    const links       = sales?.links         ?? [];
-    const currentPage = sales?.current_page  ?? 1;
-    const perPage     = Number(sales?.per_page || rows.length || 1);
-    const hasFilter   = filterData.sale_number || filterData.start_date || filterData.end_date || filterData.status;
+    const rows        = sales?.data         ?? [];
+    const links       = sales?.links        ?? [];
+    const currentPage = sales?.current_page ?? 1;
+    const perPage     = Number(sales?.per_page || 20);
+    const hasFilter   = filterData.q || filterData.date_from || filterData.date_to || filterData.status;
+
+    // Summary dari controller — gunakan kolom decimal langsung
+    const sumStats = summary && typeof summary === "object" ? summary : {};
 
     return (
         <>
-            <Head title="Riwayat Transaksi" />
+            <Head title="Riwayat Transaksi"/>
             <div className="space-y-6">
 
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <IconHistory size={28} className="text-primary-500" />
+                            <IconHistory size={28} className="text-primary-500"/>
                             Riwayat Transaksi
                         </h1>
                         <p className="text-sm text-slate-500 dark:text-slate-400">{sales?.total ?? 0} transaksi tercatat</p>
@@ -70,30 +85,56 @@ export default function History({ sales, filters, summary = {} }) {
                                     ? "bg-primary-50 border-primary-200 text-primary-700 dark:bg-primary-950/50 dark:border-primary-800 dark:text-primary-400"
                                     : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                             }`}>
-                            <IconFilter size={18} />
+                            <IconFilter size={18}/>
                             Filter
-                            {hasFilter && <span className="w-2 h-2 rounded-full bg-primary-500" />}
+                            {hasFilter && <span className="w-2 h-2 rounded-full bg-primary-500"/>}
                         </button>
                         <Link href={route("transactions.index")}
                             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium transition-colors shadow-lg shadow-primary-500/30">
-                            <IconReceipt size={18} /> Transaksi Baru
+                            <IconReceipt size={18}/> Transaksi Baru
                         </Link>
                     </div>
                 </div>
 
-                {/* Summary Cards — dari controller history() summary stats */}
-                {Object.keys(summary).length > 0 && (
+                {/* Summary Cards */}
+                {Object.keys(sumStats).length > 0 && (
                     <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                         {[
-                            { label: "Total Transaksi",  value: summary.total_transactions ?? 0, fmt: v => v, suffix: "trx",  color: "text-slate-700 dark:text-slate-200" },
-                            { label: "Total Revenue",    value: summary.total_revenue ?? 0,       fmt: fmt,    suffix: "",     color: "text-primary-600 dark:text-primary-400" },
-                            { label: "Total HPP",        value: summary.total_cogs ?? 0,          fmt: fmt,    suffix: "",     color: "text-slate-500" },
-                            { label: "Gross Profit",     value: summary.total_gross_profit ?? 0,  fmt: fmt,    suffix: "",     color: "text-emerald-600 dark:text-emerald-400" },
-                            { label: "Avg Margin",       value: summary.avg_margin ?? 0,          fmt: v => `${parseFloat(v).toFixed(1)}%`, suffix: "", color: "text-blue-600 dark:text-blue-400" },
+                            {
+                                label: "Total Transaksi",
+                                value: sumStats.total_transactions ?? 0,
+                                display: v => Number(v).toLocaleString("id-ID"),
+                                suffix: "trx",
+                                color: "text-slate-700 dark:text-slate-200",
+                            },
+                            {
+                                label: "Total Revenue",
+                                value: sumStats.total_revenue ?? 0,
+                                display: fmt,
+                                color: "text-primary-600 dark:text-primary-400",
+                            },
+                            {
+                                label: "Total HPP",
+                                value: sumStats.total_cogs ?? 0,
+                                display: fmt,
+                                color: "text-slate-500",
+                            },
+                            {
+                                label: "Gross Profit",
+                                value: sumStats.total_gross_profit ?? 0,
+                                display: fmt,
+                                color: "text-emerald-600 dark:text-emerald-400",
+                            },
+                            {
+                                label: "Avg Margin",
+                                value: sumStats.avg_margin ?? 0,
+                                display: v => `${parseFloat(v).toFixed(1)}%`,
+                                color: "text-blue-600 dark:text-blue-400",
+                            },
                         ].map(card => (
                             <div key={card.label} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 px-4 py-3">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">{card.label}</p>
-                                <p className={`text-base font-black ${card.color}`}>{card.fmt(card.value)}</p>
+                                <p className={`text-base font-black ${card.color}`}>{card.display(card.value)}</p>
                             </div>
                         ))}
                     </div>
@@ -104,34 +145,34 @@ export default function History({ sales, filters, summary = {} }) {
                     <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
                         <form onSubmit={applyFilters}>
                             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-
-                                {/* sale_number — kolom di sales table */}
+                                {/* Search: sale_number atau customer_name */}
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">No. Transaksi</label>
-                                    <input type="text" placeholder="INV/..."
-                                        value={filterData.sale_number}
-                                        onChange={e => change("sale_number", e.target.value)}
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                                        No. Transaksi / Pelanggan
+                                    </label>
+                                    <input type="text" placeholder="INV/... atau nama pelanggan"
+                                        value={filterData.q}
+                                        onChange={e => change("q", e.target.value)}
                                         className="w-full h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                                     />
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Tanggal Mulai</label>
-                                    <input type="date" value={filterData.start_date}
-                                        onChange={e => change("start_date", e.target.value)}
+                                    <input type="date" value={filterData.date_from}
+                                        onChange={e => change("date_from", e.target.value)}
                                         className="w-full h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                                     />
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Tanggal Akhir</label>
-                                    <input type="date" value={filterData.end_date}
-                                        onChange={e => change("end_date", e.target.value)}
+                                    <input type="date" value={filterData.date_to}
+                                        onChange={e => change("date_to", e.target.value)}
                                         className="w-full h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all"
                                     />
                                 </div>
 
-                                {/* Status sesuai enum sales.status */}
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Status</label>
                                     <select value={filterData.status} onChange={e => change("status", e.target.value)}
@@ -148,12 +189,12 @@ export default function History({ sales, filters, summary = {} }) {
                                 <div className="flex items-end gap-2">
                                     <button type="submit"
                                         className="flex-1 h-11 inline-flex items-center justify-center gap-2 rounded-xl bg-primary-500 hover:bg-primary-600 text-white font-medium transition-colors">
-                                        <IconSearch size={18} /> Cari
+                                        <IconSearch size={18}/> Cari
                                     </button>
                                     {hasFilter && (
                                         <button type="button" onClick={resetFilters}
                                             className="h-11 px-4 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                                            <IconX size={18} />
+                                            <IconRefresh size={18}/>
                                         </button>
                                     )}
                                 </div>
@@ -170,111 +211,133 @@ export default function History({ sales, filters, summary = {} }) {
                                 <thead>
                                     <tr className="border-b border-slate-100 dark:border-slate-800">
                                         {[
-                                            { label: "No",            cls: "text-left" },
-                                            { label: "No. Transaksi", cls: "text-left" },
-                                            { label: "Tanggal",       cls: "text-left" },
-                                            { label: "Kasir",         cls: "text-left" },
-                                            { label: "Pelanggan",     cls: "text-left" },
-                                            { label: "Item",          cls: "text-center" },
-                                            { label: "Subtotal",      cls: "text-right" },
-                                            { label: "Diskon",        cls: "text-right" },
-                                            { label: "Total",         cls: "text-right" },
-                                            { label: "Profit",        cls: "text-right" },
-                                            { label: "Margin",        cls: "text-right" },
-                                            { label: "Status",        cls: "text-center" },
-                                            { label: "",              cls: "text-center" },
+                                            { label: "No",             cls: "text-left" },
+                                            { label: "No. Transaksi",  cls: "text-left" },
+                                            { label: "Tanggal",        cls: "text-left" },
+                                            { label: "Kasir",          cls: "text-left" },
+                                            { label: "Pelanggan",      cls: "text-left" },
+                                            { label: "Item",           cls: "text-center" },
+                                            { label: "Subtotal",       cls: "text-right" },
+                                            { label: "Diskon",         cls: "text-right" },
+                                            { label: "Total",          cls: "text-right" },
+                                            { label: "Profit",         cls: "text-right" },
+                                            { label: "Margin",         cls: "text-right" },
+                                            { label: "Status",         cls: "text-center" },
+                                            { label: "",               cls: "text-center" },
                                         ].map(h => (
-                                            <th key={h.label} className={`px-4 py-4 ${h.cls} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider`}>
+                                            <th key={h.label} className={`px-4 py-4 ${h.cls} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap`}>
                                                 {h.label}
                                             </th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                    {rows.map((sale, index) => (
-                                        <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                            <td className="px-4 py-4 text-sm text-slate-500">
-                                                {index + 1 + (currentPage - 1) * perPage}
-                                            </td>
+                                    {rows.map((sale, index) => {
+                                        // sold_at adalah timestamp; parse untuk tampil tanggal & waktu
+                                        const { date, time } = fmtSoldAt(sale.sold_at);
 
-                                            {/* sale_number — format: INV/YYYYMMDD/00001 */}
-                                            <td className="px-4 py-4">
-                                                <span className="text-sm font-semibold font-mono text-slate-900 dark:text-white">
-                                                    {sale.sale_number}
-                                                </span>
-                                            </td>
+                                        // items_count dari withCount('items') di controller
+                                        const itemCount = sale.items_count ?? sale.sale_items_count ?? 0;
 
-                                            {/* sale_date (DATE) + sale_time (TIME) — dua kolom terpisah */}
-                                            <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                                                <div>{sale.sale_date}</div>
-                                                <div className="text-xs text-slate-400">{sale.sale_time?.slice(0, 5)}</div>
-                                            </td>
+                                        return (
+                                            <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                                <td className="px-4 py-4 text-sm text-slate-500">
+                                                    {index + 1 + (currentPage - 1) * perPage}
+                                                </td>
 
-                                            {/* cashier_id → cashier (User) */}
-                                            <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">
-                                                {sale.cashier?.name ?? "-"}
-                                            </td>
+                                                {/* sale_number */}
+                                                <td className="px-4 py-4">
+                                                    <span className="text-sm font-semibold font-mono text-slate-900 dark:text-white">
+                                                        {sale.sale_number}
+                                                    </span>
+                                                </td>
 
-                                            {/* customer_id → customer (Customer) */}
-                                            <td className="px-4 py-4">
-                                                <span className="px-2 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md">
-                                                    {sale.customer?.name ?? "Umum"}
-                                                </span>
-                                            </td>
+                                                {/* sold_at → date + time */}
+                                                <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                                    <div className="flex items-center gap-1">
+                                                        <IconCalendar size={12} className="text-slate-400 flex-shrink-0"/>
+                                                        <span>{date}</span>
+                                                    </div>
+                                                    <div className="text-xs text-slate-400 ml-4">{time}</div>
+                                                </td>
 
-                                            {/* total_items — bisa dari withCount('saleItems') atau sum qty */}
-                                            <td className="px-4 py-4 text-center">
-                                                <span className="px-2 py-1 text-xs font-medium bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-400 rounded-full">
-                                                    {sale.sale_items_count ?? sale.total_items ?? 0}
-                                                </span>
-                                            </td>
+                                                {/* cashier (User) — dari relasi eager-loaded */}
+                                                <td className="px-4 py-4 text-sm text-slate-600 dark:text-slate-400">
+                                                    {sale.cashier?.name ?? sale.cashier_name ?? "-"}
+                                                </td>
 
-                                            {/* subtotal = subtotal_perfume + subtotal_packaging */}
-                                            <td className="px-4 py-4 text-right text-sm text-slate-500">
-                                                {fmt(sale.subtotal)}
-                                            </td>
+                                                {/* customer — dari relasi atau snapshot */}
+                                                <td className="px-4 py-4">
+                                                    <span className="px-2 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md">
+                                                        {sale.customer?.name ?? sale.customer_name ?? "Umum"}
+                                                    </span>
+                                                </td>
 
-                                            {/* discount_amount — kolom di sales table */}
-                                            <td className="px-4 py-4 text-right text-sm text-red-500">
-                                                {Number(sale.discount_amount) > 0 ? `- ${fmt(sale.discount_amount)}` : "—"}
-                                            </td>
+                                                {/* item count */}
+                                                <td className="px-4 py-4 text-center">
+                                                    <span className="px-2 py-1 text-xs font-medium bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-400 rounded-full">
+                                                        {itemCount}
+                                                    </span>
+                                                </td>
 
-                                            {/* total = subtotal - discount_amount + tax_amount (jika ada) */}
-                                            <td className="px-4 py-4 text-right text-sm font-semibold text-slate-900 dark:text-white">
-                                                {fmt(sale.total)}
-                                            </td>
+                                                {/* subtotal = subtotal_perfume + subtotal_packaging */}
+                                                <td className="px-4 py-4 text-right text-sm text-slate-500">
+                                                    {fmt(sale.subtotal)}
+                                                </td>
 
-                                            {/* gross_profit = total - cogs_total */}
-                                            <td className="px-4 py-4 text-right text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                                                {fmt(sale.gross_profit)}
-                                            </td>
+                                                {/* discount_amount */}
+                                                <td className="px-4 py-4 text-right text-sm text-red-500">
+                                                    {Number(sale.discount_amount) > 0
+                                                        ? `- ${fmt(sale.discount_amount)}`
+                                                        : "—"
+                                                    }
+                                                </td>
 
-                                            {/* gross_margin_pct — decimal(5,2) di sales table */}
-                                            <td className="px-4 py-4 text-right">
-                                                <span className="flex items-center justify-end gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                                                    <IconTrendingUp size={12} />
-                                                    {parseFloat(sale.gross_margin_pct ?? 0).toFixed(1)}%
-                                                </span>
-                                            </td>
+                                                {/* total */}
+                                                <td className="px-4 py-4 text-right text-sm font-semibold text-slate-900 dark:text-white">
+                                                    {fmt(sale.total)}
+                                                </td>
 
-                                            {/* status: completed|pending|cancelled|refunded|draft */}
-                                            <td className="px-4 py-4 text-center">
-                                                <span className={`px-2 py-1 text-[10px] font-bold rounded-full uppercase ${STATUS_BADGE[sale.status] ?? "bg-slate-100 text-slate-500"}`}>
-                                                    {sale.status}
-                                                </span>
-                                            </td>
+                                                {/* gross_profit — bisa negatif */}
+                                                <td className="px-4 py-4 text-right text-sm font-semibold">
+                                                    <span className={Number(sale.gross_profit) >= 0
+                                                        ? "text-emerald-600 dark:text-emerald-400"
+                                                        : "text-red-500"}>
+                                                        {fmt(sale.gross_profit)}
+                                                    </span>
+                                                </td>
 
-                                            {/* Link ke print pakai sale_number */}
-                                            <td className="px-4 py-4 text-center">
-                                                <Link
-                                                    href={route("transactions.print", sale.sale_number)}
-                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
-                                                    title="Cetak Struk">
-                                                    <IconPrinter size={18} />
-                                                </Link>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                                {/* gross_margin_pct */}
+                                                <td className="px-4 py-4 text-right">
+                                                    <span className={`flex items-center justify-end gap-1 text-xs font-bold ${
+                                                        Number(sale.gross_margin_pct) >= 0
+                                                            ? "text-emerald-600 dark:text-emerald-400"
+                                                            : "text-red-500"
+                                                    }`}>
+                                                        <IconTrendingUp size={12}/>
+                                                        {parseFloat(sale.gross_margin_pct ?? 0).toFixed(1)}%
+                                                    </span>
+                                                </td>
+
+                                                {/* status */}
+                                                <td className="px-4 py-4 text-center">
+                                                    <span className={`px-2 py-1 text-[10px] font-bold rounded-full uppercase ${STATUS_BADGE[sale.status] ?? "bg-slate-100 text-slate-500"}`}>
+                                                        {STATUS_LABEL[sale.status] ?? sale.status}
+                                                    </span>
+                                                </td>
+
+                                                {/* Print link */}
+                                                <td className="px-4 py-4 text-center">
+                                                    <Link
+                                                        href={route("transactions.print", sale.sale_number)}
+                                                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
+                                                        title="Cetak Struk">
+                                                        <IconPrinter size={18}/>
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -282,19 +345,25 @@ export default function History({ sales, filters, summary = {} }) {
                 ) : (
                     <div className="flex flex-col items-center justify-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
                         <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                            <IconDatabaseOff size={32} className="text-slate-400" strokeWidth={1.5} />
+                            <IconDatabaseOff size={32} className="text-slate-400" strokeWidth={1.5}/>
                         </div>
                         <h3 className="text-lg font-medium text-slate-800 dark:text-slate-200 mb-1">Belum Ada Transaksi</h3>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                             {hasFilter ? "Tidak ada transaksi sesuai filter." : "Transaksi akan muncul di sini."}
                         </p>
+                        {hasFilter && (
+                            <button onClick={resetFilters}
+                                className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                <IconRefresh size={16}/> Reset Filter
+                            </button>
+                        )}
                     </div>
                 )}
 
-                {links.length > 3 && <Pagination links={links} />}
+                {links.length > 3 && <Pagination links={links}/>}
             </div>
         </>
     );
 }
 
-History.layout = page => <DashboardLayout children={page} />;
+History.layout = page => <DashboardLayout children={page}/>;

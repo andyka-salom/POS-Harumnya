@@ -1,12 +1,207 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import DashboardLayout from "@/Layouts/DashboardLayout";
 import { Head, useForm, Link } from "@inertiajs/react";
 import Input from "@/Components/Dashboard/Input";
 import {
     IconArrowLeft, IconDeviceFloppy, IconAlertCircle,
-    IconInfoCircle, IconBottle, IconBox,
+    IconInfoCircle, IconBottle, IconBox, IconSearch,
+    IconChevronDown, IconX, IconBuildingWarehouse, IconCheck,
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
+
+// ─── Searchable Combobox ──────────────────────────────────────────────────────
+/**
+ * Reusable searchable dropdown.
+ * Props:
+ *   options      : [{ value, label, sublabel? }]
+ *   value        : selected value string
+ *   onChange     : (value) => void
+ *   placeholder  : string
+ *   searchPlaceholder : string
+ *   error        : string | undefined
+ *   disabled     : bool
+ *   icon         : ReactNode (optional leading icon in trigger)
+ */
+function Combobox({
+    options = [],
+    value,
+    onChange,
+    placeholder = "-- Pilih --",
+    searchPlaceholder = "Cari...",
+    error,
+    disabled = false,
+    icon,
+}) {
+    const [open,       setOpen]       = useState(false);
+    const [query,      setQuery]      = useState("");
+    const containerRef                = useRef(null);
+    const inputRef                    = useRef(null);
+
+    const selected = options.find((o) => o.value === value) ?? null;
+
+    // Filter by query (name or sublabel)
+    const filtered = query.trim()
+        ? options.filter((o) =>
+            o.label.toLowerCase().includes(query.toLowerCase()) ||
+            (o.sublabel && o.sublabel.toLowerCase().includes(query.toLowerCase()))
+          )
+        : options;
+
+    // Close on outside click
+    useEffect(() => {
+        const handler = (e) => {
+            if (containerRef.current && !containerRef.current.contains(e.target)) {
+                setOpen(false);
+                setQuery("");
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, []);
+
+    // Focus search input when opened
+    useEffect(() => {
+        if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    }, [open]);
+
+    const handleSelect = (val) => {
+        onChange(val);
+        setOpen(false);
+        setQuery("");
+    };
+
+    const handleClear = (e) => {
+        e.stopPropagation();
+        onChange("");
+        setQuery("");
+    };
+
+    return (
+        <div ref={containerRef} className="relative">
+            {/* Trigger */}
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => !disabled && setOpen((v) => !v)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl border text-sm text-left transition-all
+                    ${disabled ? "opacity-60 cursor-not-allowed bg-slate-50 dark:bg-slate-800" : "cursor-pointer bg-white dark:bg-slate-950 hover:border-primary-400"}
+                    ${error ? "border-red-400 focus:ring-red-400" : "border-slate-200 dark:border-slate-700"}
+                    ${open ? "border-primary-500 ring-2 ring-primary-200 dark:ring-primary-800" : ""}
+                `}
+            >
+                {/* Leading icon */}
+                {icon && <span className="text-slate-400 shrink-0">{icon}</span>}
+
+                {/* Selected label or placeholder */}
+                <span className={`flex-1 min-w-0 truncate ${selected ? "text-slate-800 dark:text-slate-100 font-medium" : "text-slate-400"}`}>
+                    {selected ? selected.label : placeholder}
+                </span>
+
+                {/* Sublabel badge */}
+                {selected?.sublabel && (
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded shrink-0">
+                        {selected.sublabel}
+                    </span>
+                )}
+
+                {/* Clear / chevron */}
+                {selected ? (
+                    <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={handleClear}
+                        onKeyDown={(e) => e.key === "Enter" && handleClear(e)}
+                        className="text-slate-400 hover:text-slate-600 shrink-0 p-0.5 rounded"
+                    >
+                        <IconX size={14} />
+                    </span>
+                ) : (
+                    <IconChevronDown
+                        size={15}
+                        className={`text-slate-400 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+                    />
+                )}
+            </button>
+
+            {/* Dropdown */}
+            {open && (
+                <div className="absolute z-50 mt-1.5 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+                    {/* Search bar */}
+                    <div className="p-2 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                            <IconSearch size={14} className="text-slate-400 shrink-0" />
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                placeholder={searchPlaceholder}
+                                className="flex-1 bg-transparent text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 border-none outline-none focus:ring-0 p-0"
+                            />
+                            {query && (
+                                <button onClick={() => setQuery("")} className="text-slate-400 hover:text-slate-600">
+                                    <IconX size={12} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Options list */}
+                    <ul className="max-h-56 overflow-y-auto py-1">
+                        {filtered.length === 0 ? (
+                            <li className="px-4 py-3 text-sm text-slate-400 text-center italic">
+                                Tidak ada hasil untuk "{query}"
+                            </li>
+                        ) : (
+                            filtered.map((opt) => {
+                                const isActive = opt.value === value;
+                                return (
+                                    <li key={opt.value}>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelect(opt.value)}
+                                            className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors text-sm
+                                                ${isActive
+                                                    ? "bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300"
+                                                    : "hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                                }`}
+                                        >
+                                            <span className="flex-1 min-w-0">
+                                                <span className="font-medium truncate block">{opt.label}</span>
+                                                {opt.sublabel && (
+                                                    <span className="text-[11px] text-slate-400 font-mono truncate block">{opt.sublabel}</span>
+                                                )}
+                                            </span>
+                                            {isActive && (
+                                                <IconCheck size={14} className="text-primary-600 shrink-0" />
+                                            )}
+                                        </button>
+                                    </li>
+                                );
+                            })
+                        )}
+                    </ul>
+
+                    {/* Count footer */}
+                    {options.length > 10 && (
+                        <div className="px-3 py-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 text-right">
+                            {filtered.length} dari {options.length} item
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Error */}
+            {error && (
+                <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                    <IconAlertCircle size={12} /> {error}
+                </p>
+            )}
+        </div>
+    );
+}
+
+// ─── Main Create Page ─────────────────────────────────────────────────────────
 
 export default function Create({ warehouses, ingredients, packagingMaterials }) {
     const { data, setData, post, processing, errors } = useForm({
@@ -37,6 +232,22 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
         ? (groupedItems[selectedCategory] || [])
         : currentItems;
 
+    // Build combobox options for warehouse
+    const warehouseOptions = warehouses.map((w) => ({
+        value:    w.id,
+        label:    w.name,
+        sublabel: w.code,
+    }));
+
+    // Build combobox options for current items
+    const itemOptions = filteredItems.map((item) => ({
+        value:    item.id,
+        label:    item.name,
+        sublabel: isIngredient
+            ? `${item.code} · ${item.unit}`
+            : `${item.code}${item.size ? ` · ${item.size.name}` : ""}`,
+    }));
+
     // Sync selected item when item_id or type changes
     useEffect(() => {
         setSelectedItem(
@@ -63,10 +274,9 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
         const qty = parseFloat(data.quantity) || 0;
         const min = parseFloat(data.min_stock) || 0;
         const max = parseFloat(data.max_stock) || 0;
-        // qty negatif tidak relevan di form input awal (validasi backend min:0)
-        if (qty === 0)            return { type: "error",   message: "Stok kosong!" };
-        if (min && qty < min)     return { type: "warning", message: "Stok di bawah minimum!" };
-        if (max && qty > max)     return { type: "info",    message: "Stok melebihi maksimum!" };
+        if (qty === 0)        return { type: "error",   message: "Stok kosong!" };
+        if (min && qty < min) return { type: "warning", message: "Stok di bawah minimum!" };
+        if (max && qty > max) return { type: "info",    message: "Stok melebihi maksimum!" };
         return null;
     };
 
@@ -108,7 +318,7 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                         </p>
                         <div className="grid grid-cols-2 gap-4">
                             {[
-                                { type: "ingredient", label: "Ingredient", sub: "Bahan Baku",     Icon: IconBottle, color: "emerald" },
+                                { type: "ingredient", label: "Ingredient", sub: "Bahan Baku",      Icon: IconBottle, color: "emerald" },
                                 { type: "packaging",  label: "Packaging",  sub: "Kemasan & Botol", Icon: IconBox,    color: "violet"  },
                             ].map(({ type, label, sub, Icon, color }) => {
                                 const active = data.item_type === type;
@@ -152,28 +362,20 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                                 Informasi Stok
                             </h3>
 
-                            {/* Warehouse */}
+                            {/* Warehouse — searchable */}
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Pilih Gudang *
                                 </label>
-                                <select
+                                <Combobox
+                                    options={warehouseOptions}
                                     value={data.warehouse_id}
-                                    onChange={(e) => setData("warehouse_id", e.target.value)}
-                                    className="w-full rounded-xl border-slate-200 dark:bg-slate-950 focus:ring-primary-500 focus:border-primary-500"
-                                >
-                                    <option value="">-- Pilih Gudang --</option>
-                                    {warehouses.map((w) => (
-                                        <option key={w.id} value={w.id}>
-                                            {w.name} ({w.code})
-                                        </option>
-                                    ))}
-                                </select>
-                                {errors.warehouse_id && (
-                                    <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                        <IconAlertCircle size={13} /> {errors.warehouse_id}
-                                    </p>
-                                )}
+                                    onChange={(val) => setData("warehouse_id", val)}
+                                    placeholder="-- Cari atau pilih gudang --"
+                                    searchPlaceholder="Ketik nama atau kode gudang..."
+                                    error={errors.warehouse_id}
+                                    icon={<IconBuildingWarehouse size={16} />}
+                                />
                             </div>
 
                             {/* Category filter tabs */}
@@ -185,61 +387,65 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                                     <div className="flex flex-wrap gap-2">
                                         <button
                                             type="button"
-                                            onClick={() => setSelectedCategory("")}
+                                            onClick={() => {
+                                                setSelectedCategory("");
+                                                // Reset item_id jika item yang dipilih tidak ada di kategori baru
+                                                if (data.item_id) setData("item_id", "");
+                                            }}
                                             className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                                                 selectedCategory === ""
                                                     ? "bg-primary-500 text-white"
                                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                             }`}
                                         >
-                                            Semua
+                                            Semua ({currentItems.length})
                                         </button>
-                                        {Object.keys(groupedItems).map((cat) => (
+                                        {Object.entries(groupedItems).map(([cat, items]) => (
                                             <button
                                                 key={cat}
                                                 type="button"
-                                                onClick={() => setSelectedCategory(cat)}
+                                                onClick={() => {
+                                                    setSelectedCategory(cat);
+                                                    // Reset jika item terpilih bukan dari kategori ini
+                                                    if (data.item_id && !items.find(i => i.id === data.item_id)) {
+                                                        setData("item_id", "");
+                                                    }
+                                                }}
                                                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
                                                     selectedCategory === cat
                                                         ? "bg-primary-500 text-white"
                                                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                                 }`}
                                             >
-                                                {cat}
+                                                {cat} ({items.length})
                                             </button>
                                         ))}
                                     </div>
                                 </div>
                             )}
 
-                            {/* Item select */}
+                            {/* Item select — searchable */}
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Pilih {isIngredient ? "Ingredient" : "Packaging"} *
                                 </label>
-                                <select
+                                <Combobox
+                                    options={itemOptions}
                                     value={data.item_id}
-                                    onChange={(e) => setData("item_id", e.target.value)}
-                                    className="w-full rounded-xl border-slate-200 dark:bg-slate-950 focus:ring-primary-500 focus:border-primary-500"
-                                >
-                                    <option value="">-- Pilih Item --</option>
-                                    {filteredItems.map((item) => (
-                                        <option key={item.id} value={item.id}>
-                                            {item.name} ({item.code})
-                                            {!isIngredient && item.size ? ` — ${item.size.name}` : ""}
-                                        </option>
-                                    ))}
-                                </select>
-                                {errors.item_id && (
-                                    <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                                        <IconAlertCircle size={13} /> {errors.item_id}
-                                    </p>
-                                )}
+                                    onChange={(val) => setData("item_id", val)}
+                                    placeholder={`-- Cari atau pilih ${isIngredient ? "ingredient" : "packaging"} --`}
+                                    searchPlaceholder={`Ketik nama atau kode ${isIngredient ? "ingredient" : "packaging"}...`}
+                                    error={errors.item_id}
+                                    icon={isIngredient ? <IconBottle size={16} /> : <IconBox size={16} />}
+                                />
+                                {/* Selected item info badge */}
                                 {selectedItem && (
-                                    <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs text-blue-700 dark:text-blue-300">
-                                        <strong>Kategori:</strong> {selectedItem.category?.name}
-                                        &nbsp;·&nbsp;
-                                        <strong>Satuan:</strong> {getItemUnit()}
+                                    <div className="mt-2 p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs text-blue-700 dark:text-blue-300 flex flex-wrap gap-x-3 gap-y-1">
+                                        <span><strong>Kategori:</strong> {selectedItem.category?.name || "—"}</span>
+                                        <span><strong>Satuan:</strong> {getItemUnit()}</span>
+                                        {!isIngredient && selectedItem.size && (
+                                            <span><strong>Ukuran:</strong> {selectedItem.size.name}</span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -270,7 +476,7 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                                 />
                             </div>
 
-                            {/* Stock limits — kedua tipe punya max_stock di migration */}
+                            {/* Stock limits */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <Input
                                     label="Stok Minimum (Alert Low)"
@@ -306,18 +512,14 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                                     </p>
                                     <p className="text-2xl font-bold text-primary-600 dark:text-primary-400">
                                         {new Intl.NumberFormat("id-ID", {
-                                            style: "currency",
-                                            currency: "IDR",
-                                            minimumFractionDigits: 0,
+                                            style: "currency", currency: "IDR", minimumFractionDigits: 0,
                                         }).format(totalValue())}
                                     </p>
                                     <p className="text-xs text-primary-500 mt-1">
                                         {parseInt(data.quantity, 10).toLocaleString("id-ID")} {getItemUnit()}
                                         &nbsp;×&nbsp;
                                         {new Intl.NumberFormat("id-ID", {
-                                            style: "currency",
-                                            currency: "IDR",
-                                            minimumFractionDigits: 0,
+                                            style: "currency", currency: "IDR", minimumFractionDigits: 0,
                                         }).format(data.average_cost)}
                                     </p>
                                 </div>
@@ -330,18 +532,12 @@ export default function Create({ warehouses, ingredients, packagingMaterials }) 
                                                                "bg-blue-50 border-blue-200"
                                 }`}>
                                     <IconAlertCircle size={17} className={
-                                        alert.type === "error"
-                                            ? "text-red-500"
-                                            : alert.type === "warning"
-                                            ? "text-yellow-500"
-                                            : "text-blue-500"
+                                        alert.type === "error"   ? "text-red-500"    :
+                                        alert.type === "warning" ? "text-yellow-500" : "text-blue-500"
                                     } />
                                     <p className={`text-sm font-bold ${
-                                        alert.type === "error"
-                                            ? "text-red-700"
-                                            : alert.type === "warning"
-                                            ? "text-yellow-700"
-                                            : "text-blue-700"
+                                        alert.type === "error"   ? "text-red-700"    :
+                                        alert.type === "warning" ? "text-yellow-700" : "text-blue-700"
                                     }`}>
                                         {alert.message}
                                     </p>

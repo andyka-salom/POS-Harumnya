@@ -113,27 +113,33 @@ return new class extends Migration
         // Contoh: EDT 50ml → oil=15ml, alcohol=35ml, total=50ml
         Schema::create('intensity_size_quantities', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->uuid('intensity_id');
-            $table->uuid('size_id');
+
+            // Gunakan foreignUuid() untuk foreign keys yang merujuk ke UUID
+            $table->foreignUuid('intensity_id')->constrained('intensities')->cascadeOnDelete();
+            $table->foreignUuid('size_id')->constrained('sizes')->cascadeOnDelete();
 
             // Tetap integer — sudah dikalibrasi manual, bukan hasil hitung
             $table->unsignedSmallInteger('oil_quantity')
                   ->comment('Volume fragrance oil (ml, integer, hasil kalibrasi manual)');
             $table->unsignedSmallInteger('alcohol_quantity')
                   ->comment('Volume alcohol (ml, integer, hasil kalibrasi manual)');
+
+            // Tambahkan kembali other_quantity jika masih relevan dari model Anda
+            $table->unsignedSmallInteger('other_quantity')
+                  ->nullable() // Jika bisa kosong
+                  ->default(0) // Atau default 0 jika selalu ada tapi mungkin 0
+                  ->comment('Volume bahan lain (ml, integer, hasil kalibrasi manual)');
+
             $table->unsignedSmallInteger('total_volume')
-                  ->comment('oil_quantity + alcohol_quantity; HARUS = sizes.volume_ml');
+                  ->comment('oil_quantity + alcohol_quantity [+ other_quantity]; HARUS = sizes.volume_ml');
 
             $table->boolean('is_active')->default(true);
             $table->text('notes')->nullable();
             $table->timestamps();
 
-            $table->foreign('intensity_id')
-                  ->references('id')->on('intensities')->cascadeOnDelete();
-            $table->foreign('size_id')
-                  ->references('id')->on('sizes')->cascadeOnDelete();
-
+            // Unique constraint sudah bagus
             $table->unique(['intensity_id', 'size_id'], 'uq_isq_intensity_size');
+            // Index sudah bagus
             $table->index(['intensity_id', 'size_id', 'is_active'], 'idx_isq_lookup');
         });
 

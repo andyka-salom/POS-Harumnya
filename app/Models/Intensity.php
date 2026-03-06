@@ -15,8 +15,8 @@ class Intensity extends Model
     protected $fillable = [
         'code',
         'name',
-        'oil_ratio',
-        'alcohol_ratio',
+        'oil_ratio',     // disimpan sebagai angka string: "1", "2", "3", dst
+        'alcohol_ratio', // disimpan sebagai angka string: "1", "2", "4", dst
         'sort_order',
         'is_active',
     ];
@@ -57,32 +57,26 @@ class Intensity extends Model
     }
 
     /**
-     * Ratio display — kembalikan oil_ratio apa adanya (sudah dalam format "X : Y")
+     * Ratio display dalam format "X : Y"
+     * oil_ratio="1", alcohol_ratio="2" → "1 : 2"
      */
     public function getRatioDisplayAttribute(): string
     {
-        return $this->oil_ratio ?? '1 : 1';
+        $oil     = $this->oil_ratio     ?? '1';
+        $alcohol = $this->alcohol_ratio ?? '1';
+        return trim($oil) . ' : ' . trim($alcohol);
     }
 
     /**
-     * Hitung oil percentage dari string ratio untuk keperluan tampilan & bar.
-     * Contoh: "1 : 2" → 33.33, "1 : 1" → 50, "2 : 1" → 66.67
-     */
-    public function getOilPercentageAttribute(): float
-    {
-        return $this->parseOilPercentage($this->oil_ratio);
-    }
-
-    /**
-     * Concentration level berdasarkan oil_ratio string:
-     *   "1 : 4" → light   (Body Mist ~20%)
-     *   "1 : 2" → moderate (EDT ~33%)
-     *   "1 : 1" → strong   (EDP ~50%)
-     *   "2 : 1" → extreme  (Extrait ~67%)
+     * Concentration level berdasarkan ratio numerik:
+     * 1:4 (20%)  → light
+     * 1:2 (33%)  → moderate
+     * 1:1 (50%)  → strong
+     * 2:1 (67%)  → extreme
      */
     public function getConcentrationLevelAttribute(): string
     {
-        $pct = $this->parseOilPercentage($this->oil_ratio);
+        $pct = $this->getOilPercentage();
 
         if ($pct >= 60) return 'extreme';
         if ($pct >= 42) return 'strong';
@@ -91,7 +85,30 @@ class Intensity extends Model
     }
 
     /**
-     * Cek apakah semua size sudah dikonfigurasi quantitynya
+     * Label level konsentrasi untuk display
+     */
+    public function getConcentrationLabelAttribute(): string
+    {
+        $oil     = (int) ($this->oil_ratio     ?? 1);
+        $alcohol = (int) ($this->alcohol_ratio ?? 1);
+
+        // Match preset terdekat
+        if ($oil === 1 && $alcohol === 4) return 'Body Mist';
+        if ($oil === 1 && $alcohol === 2) return 'EDT';
+        if ($oil === 1 && $alcohol === 1) return 'EDP';
+        if ($oil === 2 && $alcohol === 1) return 'Extrait';
+
+        // Fallback berdasarkan persentase
+        return match($this->concentration_level) {
+            'extreme'  => 'Extrait',
+            'strong'   => 'EDP',
+            'moderate' => 'EDT',
+            default    => 'Body Mist',
+        };
+    }
+
+    /**
+     * Cek apakah semua size aktif sudah dikonfigurasi
      */
     public function getIsQuantityCompleteAttribute(): bool
     {
@@ -129,21 +146,18 @@ class Intensity extends Model
     // -------------------------------------------------------------------------
 
     /**
-     * Parse string ratio "X : Y" → oil percentage (float)
-     * Contoh: "1 : 2" → 33.33, "2 : 1" → 66.67
+     * Hitung oil percentage dari oil_ratio & alcohol_ratio (angka terpisah).
+     * oil_ratio="1", alcohol_ratio="2" → 33.33
+     * oil_ratio="2", alcohol_ratio="1" → 66.67
      */
-    public function parseOilPercentage(string $ratio): float
+    public function getOilPercentage(): float
     {
-        // Format: "X : Y" atau "X:Y"
-        $parts = preg_split('/\s*:\s*/', trim($ratio));
+        $oil     = (float) ($this->oil_ratio     ?? 1);
+        $alcohol = (float) ($this->alcohol_ratio ?? 1);
+        $total   = $oil + $alcohol;
 
-        if (count($parts) !== 2) return 50.0;
+        if ($total <= 0) return 50.0;
 
-        $o = (float) $parts[0];
-        $a = (float) $parts[1];
-
-        if (($o + $a) == 0) return 50.0;
-
-        return round(($o / ($o + $a)) * 100, 4);
+        return round(($oil / $total) * 100, 4);
     }
 }

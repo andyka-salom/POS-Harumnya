@@ -22,9 +22,11 @@ class PackagingMaterial extends Model
         'image',
         'description',
         'is_available_as_addon',
-        // Pricing (dari migration 003)
+        // Pricing
         'purchase_price',
         'selling_price',
+        'is_free',
+        'free_condition_note',
         'average_cost',
         // Status
         'is_active',
@@ -34,10 +36,11 @@ class PackagingMaterial extends Model
     protected $casts = [
         'is_active'             => 'boolean',
         'is_available_as_addon' => 'boolean',
+        'is_free'               => 'boolean',
         'sort_order'            => 'integer',
         'purchase_price'        => 'integer',
         'selling_price'         => 'integer',
-        'average_cost'          => 'decimal:4',  // 15,4 di migration
+        'average_cost'          => 'decimal:4',
     ];
 
     protected $appends = ['image_url'];
@@ -50,21 +53,42 @@ class PackagingMaterial extends Model
     }
 
     /**
-     * Margin jual vs biaya rata-rata (dalam %)
-     * Dipakai di tabel Index untuk info profitabilitas
+     * Harga efektif yang ditagih ke pelanggan.
+     * Jika is_free = true → 0, meski selling_price terisi.
      */
-    public function getMarginPercentageAttribute(): float
+    public function getEffectiveSellingPriceAttribute(): int
     {
-        if (!$this->selling_price || !$this->average_cost) return 0;
-        return round((($this->selling_price - $this->average_cost) / $this->selling_price) * 100, 2);
+        return $this->is_free ? 0 : (int) $this->selling_price;
     }
 
     /**
-     * Profit per unit jika dijual sebagai addon
+     * Margin jual vs HPP (average_cost).
+     * Jika is_free → margin negatif = biaya subsidi kemasan.
+     */
+    public function getMarginPercentageAttribute(): float
+    {
+        $avgCost     = (float) $this->average_cost;
+        $effectivePrice = $this->effective_selling_price;
+
+        if ($avgCost <= 0) return 0;
+
+        // Jika gratis: margin = -100% dari sisi pendapatan, tapi kita hitung subsidi
+        if ($this->is_free) {
+            return -100.0;
+        }
+
+        if ($effectivePrice <= 0) return 0;
+
+        return round((($effectivePrice - $avgCost) / $effectivePrice) * 100, 2);
+    }
+
+    /**
+     * Profit (atau biaya subsidi) per unit.
+     * Negatif jika is_free (seluruh average_cost jadi beban).
      */
     public function getProfitPerUnitAttribute(): int
     {
-        return max(0, $this->selling_price - (int) round($this->average_cost));
+        return $this->effective_selling_price - (int) round((float) $this->average_cost);
     }
 
     // ─── Relations ──────────────────────────────────────────────────────
@@ -79,13 +103,11 @@ class PackagingMaterial extends Model
         return $this->belongsTo(Size::class);
     }
 
-    // Stok di tiap warehouse
     public function warehouseStocks(): HasMany
     {
         return $this->hasMany(WarehousePackagingStock::class, 'packaging_material_id');
     }
 
-    // Stok di tiap toko
     public function storeStocks(): HasMany
     {
         return $this->hasMany(StorePackagingStock::class, 'packaging_material_id');
@@ -114,11 +136,16 @@ class PackagingMaterial extends Model
                      ->where('is_available_as_addon', true);
     }
 
+    public function scopeFree($query)
+    {
+        return $query->where('is_free', true);
+    }
+
     // ─── WAC Update Helper ───────────────────────────────────────────────
 
     /**
      * Update average_cost dengan formula WAC saat purchase diterima.
-     * Dipanggil dari PurchaseController::receive()
+     * average_cost tetap dihitung meski is_free = true → laporan HPP akurat.
      *
      * @param int   $qtyReceived   Jumlah yang diterima dari PO
      * @param int   $purchasePrice Harga beli per unit di PO ini
@@ -126,8 +153,8 @@ class PackagingMaterial extends Model
      */
     public function updateAverageCost(int $qtyReceived, int $purchasePrice, float $currentStock): void
     {
-        $oldCost    = (float) $this->average_cost;   // WAC lama
-        $oldQty     = $currentStock;                 // Stok sebelum terima
+        $oldCost = (float) $this->average_cost;
+        $oldQty  = $currentStock;
 
         if (($oldQty + $qtyReceived) <= 0) return;
 
@@ -136,8 +163,8 @@ class PackagingMaterial extends Model
                     / ($oldQty + $qtyReceived);
 
         $this->update([
-            'average_cost'  => round($newAvgCost, 4),
-            'purchase_price' => $purchasePrice,      // update juga harga beli standar
+            'average_cost'   => round($newAvgCost, 4),
+            'purchase_price' => $purchasePrice,
         ]);
     }
 }

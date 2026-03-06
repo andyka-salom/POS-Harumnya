@@ -31,15 +31,13 @@ use App\Http\Controllers\Laporan\LaporanKeuanganController;
 use App\Http\Controllers\Laporan\LaporanPenjualanController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\Reports\ProfitReportController;
-use App\Http\Controllers\Reports\SalesReportController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 // ─── Root Redirect ────────────────────────────────────────────────────────────
 
-Route::get('/', fn() => redirect()->route('login'));
+Route::get('/', fn () => redirect()->route('login'));
 
 // ─── Authenticated Routes ─────────────────────────────────────────────────────
 
@@ -156,12 +154,12 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
     // ── Ingredients (Bahan Baku) ──────────────────────────────────────────────
 
     Route::prefix('ingredients')->name('ingredients.')->group(function () {
-        Route::get('/',                 [IngredientController::class, 'index'])->name('index');
-        Route::get('/create',           [IngredientController::class, 'create'])->name('create');
-        Route::post('/',                [IngredientController::class, 'store'])->name('store');
-        Route::get('/{ingredient}/edit',[IngredientController::class, 'edit'])->name('edit');
-        Route::put('/{ingredient}',     [IngredientController::class, 'update'])->name('update');
-        Route::delete('/{ingredient}',  [IngredientController::class, 'destroy'])->name('destroy');
+        Route::get('/',                  [IngredientController::class, 'index'])->name('index');
+        Route::get('/create',            [IngredientController::class, 'create'])->name('create');
+        Route::post('/',                 [IngredientController::class, 'store'])->name('store');
+        Route::get('/{ingredient}/edit', [IngredientController::class, 'edit'])->name('edit');
+        Route::put('/{ingredient}',      [IngredientController::class, 'update'])->name('update');
+        Route::delete('/{ingredient}',   [IngredientController::class, 'destroy'])->name('destroy');
 
         Route::prefix('categories')->name('categories.')->group(function () {
             Route::post('/',             [IngredientController::class, 'storeCategory'])->name('store');
@@ -188,25 +186,30 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
     });
 
     // ── Recipes (Formula & Resep) ─────────────────────────────────────────────
-
+    //
+    //  ! PENTING: route statis /import HARUS didaftarkan SEBELUM route
+    //  dinamis /{variant}/{intensity} agar tidak bentrok.
+    //
     Route::prefix('recipes')->name('recipes.')->group(function () {
-        Route::get('/',                                [RecipeController::class, 'index'])->name('index');
-        Route::get('/create',                          [RecipeController::class, 'create'])->name('create');
-        Route::post('/',                               [RecipeController::class, 'store'])->name('store');
-        Route::get('/{variant_id}/{intensity_id}',     [RecipeController::class, 'show'])->name('show');
-        Route::get('/{variant_id}/{intensity_id}/edit',[RecipeController::class, 'edit'])->name('edit');
-        Route::put('/{variant_id}/{intensity_id}',     [RecipeController::class, 'update'])->name('update');
-        Route::delete('/{variant_id}/{intensity_id}',  [RecipeController::class, 'destroy'])->name('destroy');
-        Route::post('/{variant_id}/{intensity_id}/generate-products',
-            [RecipeController::class, 'generateProducts']
-        )->name('generate-products');
 
-        Route::prefix('import')->name('import.')->group(function () {
-            Route::get('/',          [RecipeController::class, 'importIndex'])->name('index');
-            Route::get('/template',  [RecipeController::class, 'importTemplate'])->name('template');
-            Route::post('/validate', [RecipeController::class, 'importValidate'])->name('validate');
-            Route::post('/',         [RecipeController::class, 'importStore'])->name('store');
-        });
+        // Import — wajib di atas wildcard
+        Route::get('/import',           [RecipeController::class, 'importIndex'])   ->name('import.index');
+        Route::get('/import/template',  [RecipeController::class, 'importTemplate'])->name('import.template');
+        Route::post('/import/validate', [RecipeController::class, 'importValidate'])->name('import.validate');
+        Route::post('/import/store',    [RecipeController::class, 'importStore'])   ->name('import.store');
+
+        // CRUD utama
+        Route::get('/',                           [RecipeController::class, 'index'])->name('index');
+        Route::get('/create',                     [RecipeController::class, 'create'])->name('create');
+        Route::post('/',                          [RecipeController::class, 'store'])->name('store');
+        Route::get('/{variant}/{intensity}',      [RecipeController::class, 'show'])->name('show');
+        Route::get('/{variant}/{intensity}/edit', [RecipeController::class, 'edit'])->name('edit');
+        Route::put('/{variant}/{intensity}',      [RecipeController::class, 'update'])->name('update');
+        Route::delete('/{variant}/{intensity}',   [RecipeController::class, 'destroy'])->name('destroy');
+
+        // Generate Products
+        Route::post('/{variant}/{intensity}/generate-products', [RecipeController::class, 'generateProducts'])
+            ->name('generate-products');
     });
 
     // ── Products & Harga ──────────────────────────────────────────────────────
@@ -294,9 +297,9 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
     // ── Stock Movements (Log) ─────────────────────────────────────────────────
 
     Route::prefix('stock-movements')->name('stock-movements.')->group(function () {
-        Route::get('/',                   [StockMovementController::class, 'index'])->name('index');
-        Route::get('/{id}',               [StockMovementController::class, 'show'])->name('show');
-        Route::post('/available-stock',   [StockMovementController::class, 'getAvailableStock'])->name('available-stock');
+        Route::get('/',                 [StockMovementController::class, 'index'])->name('index');
+        Route::get('/{id}',             [StockMovementController::class, 'show'])->name('show');
+        Route::post('/available-stock', [StockMovementController::class, 'getAvailableStock'])->name('available-stock');
     });
 
     // ── Purchases (Purchase Order) ────────────────────────────────────────────
@@ -318,13 +321,13 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
 
     // ── Customers ─────────────────────────────────────────────────────────────
 
-    Route::get('customers/export',           [CustomerController::class, 'export'])
+    Route::get('customers/export',            [CustomerController::class, 'export'])
         ->middleware('permission:customers-access')
         ->name('customers.export');
-    Route::get('customers/{customer}/history',[CustomerController::class, 'getHistory'])
+    Route::get('customers/{customer}/history', [CustomerController::class, 'getHistory'])
         ->middleware('permission:transactions-access')
         ->name('customers.history');
-    Route::post('customers/store-ajax',      [CustomerController::class, 'storeAjax'])
+    Route::post('customers/store-ajax',       [CustomerController::class, 'storeAjax'])
         ->middleware('permission:customers-create')
         ->name('customers.store-ajax');
     Route::resource('customers', CustomerController::class);
@@ -343,32 +346,61 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
 
     // ── Transactions ──────────────────────────────────────────────────────────
     //
-    //  ! PENTING: urutan route MATTER di Laravel.
-    //  Route statis (/history, /get-intensities, dll) HARUS didaftarkan
-    //  SEBELUM route dinamis (/{id}) agar tidak bentrok.
+    //  ! PENTING: route statis (/history, /get-intensities, dll) HARUS
+    //  didaftarkan SEBELUM route dinamis (/{id}) agar tidak bentrok.
     //
     Route::prefix('transactions')->name('transactions.')->group(function () {
 
         // Pages
-        Route::get('/',                   [TransactionController::class, 'index'])  ->name('index');
-        Route::get('/history',            [TransactionController::class, 'history'])->name('history');
-        Route::get('/print/{saleNumber}', [TransactionController::class, 'print'])  ->name('print');
+        Route::get('/',                   [TransactionController::class, 'index'])
+            ->name('index');
 
-        // AJAX — Builder Steps
-        Route::get('/get-intensities',    [TransactionController::class, 'getAvailableIntensities'])->name('get-intensities');
-        Route::get('/get-sizes',          [TransactionController::class, 'getAvailableSizes'])      ->name('get-sizes');
-        Route::post('/get-perfume-price', [TransactionController::class, 'getPerfumePrice'])        ->name('get-perfume-price');
+        Route::get('/history',            [TransactionController::class, 'history'])
+            ->name('history');
 
-        // Cart Actions
-        Route::post('/add-to-cart',      [TransactionController::class, 'addToCart'])     ->name('add-to-cart');
-        Route::post('/store',            [TransactionController::class, 'store'])          ->name('store');
-        Route::post('/hold',             [TransactionController::class, 'holdCart'])       ->name('hold');
-        Route::post('/resume/{holdId}',  [TransactionController::class, 'resumeHeldCart'])->name('resume');
+        Route::get('/print/{saleNumber}', [TransactionController::class, 'print'])
+            ->where('saleNumber', '[A-Za-z0-9\-]+')
+            ->name('print');
 
-        // PATCH & DELETE menggunakan prefix /cart/ agar tidak bentrok dengan /{id}
-        Route::patch('/cart/{id}',       [TransactionController::class, 'updateCart'])    ->name('update-cart');
-        Route::delete('/cart/{id}',      [TransactionController::class, 'destroyCart'])   ->name('destroy-cart');
-        Route::delete('/held/{holdId}',  [TransactionController::class, 'deleteHeldCart'])->name('delete-held');
+        // ── API: Product Selection (Flow: Intensity → Variant → Size) ──
+        //
+        // DIHAPUS: get-intensities  (intensities sekarang dikirim langsung dari index())
+        //
+        // BARU: get-variants — ambil variant berdasarkan intensity yang dipilih
+        Route::get('get-variants',        [TransactionController::class, 'getVariantsForIntensity'])
+            ->name('get-variants');
+
+        // get-sizes — parameter: intensity_id + variant_id
+        Route::get('get-sizes',           [TransactionController::class, 'getAvailableSizes'])
+            ->name('get-sizes');
+
+        // Harga perfume setelah intensity + variant + size dipilih
+        Route::post('get-perfume-price',  [TransactionController::class, 'getPerfumePrice'])
+            ->name('get-perfume-price');
+
+        // ── Cart ──────────────────────────────────────────────────
+        Route::post('add-to-cart',        [TransactionController::class, 'addToCart'])
+            ->name('add-to-cart');
+
+        Route::patch('cart/{id}',         [TransactionController::class, 'updateCart'])
+            ->name('update-cart');
+
+        Route::delete('cart/{id}',        [TransactionController::class, 'destroyCart'])
+            ->name('destroy-cart');
+
+        // ── Hold / Resume ─────────────────────────────────────────
+        Route::post('hold',               [TransactionController::class, 'holdCart'])
+            ->name('hold');
+
+        Route::post('resume/{holdId}',    [TransactionController::class, 'resumeHeldCart'])
+            ->name('resume');
+
+        Route::delete('held/{holdId}',    [TransactionController::class, 'deleteHeldCart'])
+            ->name('delete-held');
+
+        // ── Checkout ──────────────────────────────────────────────
+        Route::post('store',              [TransactionController::class, 'store'])
+            ->name('store');
     });
 
     // ── Payment Methods ───────────────────────────────────────────────────────
@@ -380,6 +412,7 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
     // ── Laporan ───────────────────────────────────────────────────────────────
 
     Route::prefix('laporan')->name('laporan.')->group(function () {
+
         Route::get('penjualan', [LaporanPenjualanController::class, 'index'])
             ->middleware('permission:reports-access')
             ->name('penjualan');
@@ -389,23 +422,17 @@ Route::middleware(['auth'])->prefix('dashboard')->group(function () {
             ->name('keuangan');
     });
 
-    // ── Reports (Legacy — tetap dipertahankan agar tidak breaking) ────────────
-
-    Route::get('reports/sales', [SalesReportController::class, 'index'])
-        ->middleware('permission:reports-access')
-        ->name('reports.sales.index');
-    Route::get('reports/profits', [ProfitReportController::class, 'index'])
-        ->middleware('permission:profits-access')
-        ->name('reports.profits.index');
-
     // ── Settings ──────────────────────────────────────────────────────────────
 
-    Route::get('settings/payments',  [PaymentSettingController::class, 'edit'])
-        ->middleware('permission:payment-settings-access')
-        ->name('settings.payments.edit');
-    Route::put('settings/payments',  [PaymentSettingController::class, 'update'])
-        ->middleware('permission:payment-settings-access')
-        ->name('settings.payments.update');
+    Route::prefix('settings')->name('settings.')->group(function () {
+
+        Route::get('payments',  [PaymentSettingController::class, 'edit'])
+            ->middleware('permission:payment-settings-access')
+            ->name('payments.edit');
+        Route::put('payments',  [PaymentSettingController::class, 'update'])
+            ->middleware('permission:payment-settings-access')
+            ->name('payments.update');
+    });
 
     // ── Profile ───────────────────────────────────────────────────────────────
 

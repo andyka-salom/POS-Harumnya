@@ -4,7 +4,7 @@ import { Head, useForm, Link } from "@inertiajs/react";
 import Input from "@/Components/Dashboard/Input";
 import {
     IconArrowLeft, IconDeviceFloppy, IconPackage,
-    IconPhoto, IconCoin, IconInfoCircle, IconX,
+    IconPhoto, IconCoin, IconInfoCircle, IconX, IconGift,
 } from "@tabler/icons-react";
 import toast from "react-hot-toast";
 
@@ -40,24 +40,28 @@ function Select({ label, required, value, onChange, errors, children }) {
     );
 }
 
-function PriceInput({ label, value, onChange, hint, errors }) {
+function PriceInput({ label, value, onChange, hint, errors, disabled = false }) {
     return (
         <div>
-            {label && <label className="block text-sm font-medium mb-1 dark:text-slate-300">{label}</label>}
+            {label && <label className={`block text-sm font-medium mb-1 ${disabled ? "text-slate-400 dark:text-slate-600" : "dark:text-slate-300"}`}>{label}</label>}
             <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">Rp</span>
+                <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${disabled ? "text-slate-300 dark:text-slate-700" : "text-slate-400"}`}>Rp</span>
                 <input
                     type="text"
                     inputMode="numeric"
-                    value={value ? fmt(value) : ""}
-                    onChange={e => onChange(Number(e.target.value.replace(/\D/g, "")))}
+                    disabled={disabled}
+                    value={disabled ? "0" : (value ? fmt(value) : "")}
+                    onChange={disabled ? undefined : e => onChange(Number(e.target.value.replace(/\D/g, "")))}
                     placeholder="0"
-                    className={`w-full h-10 pl-10 pr-3 rounded-xl border bg-white dark:bg-slate-950 dark:text-white text-sm
-                        focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all
-                        ${errors ? "border-red-400" : "border-slate-300 dark:border-slate-700"}`}
+                    className={`w-full h-10 pl-10 pr-3 rounded-xl border text-sm transition-all
+                        ${disabled
+                            ? "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-400 cursor-not-allowed"
+                            : `bg-white dark:bg-slate-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                               ${errors ? "border-red-400" : "border-slate-300 dark:border-slate-700"}`
+                        }`}
                 />
             </div>
-            {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
+            {hint && <p className={`text-[11px] mt-1 ${disabled ? "text-slate-300 dark:text-slate-700" : "text-slate-400"}`}>{hint}</p>}
             {errors && <p className="text-red-500 text-xs mt-1">{errors}</p>}
         </div>
     );
@@ -76,6 +80,8 @@ export default function Create({ categories, sizes }) {
         description:           "",
         purchase_price:        0,
         selling_price:         0,
+        is_free:               false,
+        free_condition_note:   "",
         is_available_as_addon: true,
         is_active:             true,
         sort_order:            0,
@@ -103,8 +109,15 @@ export default function Create({ categories, sizes }) {
         });
     };
 
-    const margin = data.selling_price > 0 && data.purchase_price > 0
-        ? (((data.selling_price - data.purchase_price) / data.selling_price) * 100).toFixed(1)
+    // Harga efektif untuk kalkulasi margin
+    const effectivePrice = data.is_free ? 0 : data.selling_price;
+    const margin = !data.is_free && effectivePrice > 0 && data.purchase_price > 0
+        ? (((effectivePrice - data.purchase_price) / effectivePrice) * 100).toFixed(1)
+        : null;
+
+    // Subsidi per unit jika gratis
+    const subsidyPerUnit = data.is_free && data.purchase_price > 0
+        ? data.purchase_price
         : null;
 
     return (
@@ -134,6 +147,7 @@ export default function Create({ categories, sizes }) {
                         {/* ── Kolom Kiri ──────────────────────────────────── */}
                         <div className="lg:col-span-2 space-y-6">
 
+                            {/* Info Dasar */}
                             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
                                 <h2 className="text-base font-bold mb-5 flex items-center gap-2 text-slate-800 dark:text-white">
                                     <IconPackage size={18} className="text-teal-600" /> Informasi Dasar
@@ -217,8 +231,51 @@ export default function Create({ categories, sizes }) {
                                     <p className="text-xs text-slate-500">
                                         <strong>Harga Beli</strong> = referensi awal HPP.
                                         <strong> Harga Jual</strong> = harga saat dijual sebagai add-on di POS.
-                                        HPP akan otomatis update saat Purchase Order diterima.
+                                        HPP otomatis update saat Purchase Order diterima.
                                     </p>
+                                </div>
+
+                                {/* Toggle Gratis */}
+                                <div className={`mb-5 p-4 rounded-xl border transition-all ${
+                                    data.is_free
+                                        ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900"
+                                        : "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700"
+                                }`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <IconGift size={18} className={data.is_free ? "text-emerald-600" : "text-slate-400"} />
+                                            <div>
+                                                <span className={`text-sm font-bold ${data.is_free ? "text-emerald-700 dark:text-emerald-400" : "dark:text-white"}`}>
+                                                    Kemasan Gratis
+                                                </span>
+                                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                                    Gratis ke pelanggan; HPP tetap dihitung untuk laporan
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={data.is_free}
+                                                onChange={e => setData("is_free", e.target.checked)}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-slate-200 peer-checked:bg-emerald-500 rounded-full peer peer-focus:ring-2 peer-focus:ring-emerald-400 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5" />
+                                        </label>
+                                    </div>
+
+                                    {/* Field keterangan muncul saat is_free aktif */}
+                                    {data.is_free && (
+                                        <div className="mt-3">
+                                            <Input
+                                                label="Keterangan Gratis"
+                                                value={data.free_condition_note}
+                                                onChange={e => setData("free_condition_note", e.target.value)}
+                                                errors={errors.free_condition_note}
+                                                placeholder="Cth: Gratis untuk setiap pembelian"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -233,11 +290,13 @@ export default function Create({ categories, sizes }) {
                                         label="Harga Jual Add-on (Rp)"
                                         value={data.selling_price}
                                         onChange={v => setData("selling_price", v)}
-                                        hint="Harga yang ditagih ke pelanggan di POS"
+                                        hint={data.is_free ? "Diabaikan — kemasan ini gratis" : "Harga yang ditagih ke pelanggan di POS"}
                                         errors={errors.selling_price}
+                                        disabled={data.is_free}
                                     />
                                 </div>
 
+                                {/* Info margin normal */}
                                 {margin !== null && (
                                     <div className={`mt-4 p-3 rounded-xl flex items-center justify-between text-sm ${
                                         parseFloat(margin) >= 0
@@ -250,8 +309,28 @@ export default function Create({ categories, sizes }) {
                                                 {margin}%
                                             </span>
                                             <span className={`block text-xs ${parseFloat(margin) >= 0 ? "text-teal-500" : "text-red-400"}`}>
-                                                Rp {fmt(data.selling_price - data.purchase_price)} / unit
+                                                Rp {fmt(effectivePrice - data.purchase_price)} / unit
                                             </span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Info subsidi jika gratis */}
+                                {subsidyPerUnit !== null && (
+                                    <div className="mt-4 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 flex items-center justify-between text-sm">
+                                        <div>
+                                            <span className="text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1.5">
+                                                <IconGift size={14} /> Biaya Subsidi Kemasan
+                                            </span>
+                                            <p className="text-[11px] text-amber-600/70 dark:text-amber-500/60 mt-0.5">
+                                                Dicatat sebagai beban HPP, bukan pendapatan
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="font-bold text-base text-amber-700 dark:text-amber-400">
+                                                Rp {fmt(subsidyPerUnit)}
+                                            </span>
+                                            <span className="block text-xs text-amber-500">per unit</span>
                                         </div>
                                     </div>
                                 )}

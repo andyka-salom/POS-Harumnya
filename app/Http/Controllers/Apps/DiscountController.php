@@ -25,11 +25,16 @@ class DiscountController extends Controller
         $discounts = DiscountType::query()
             ->with(['stores.store:id,name', 'rewards'])
             ->when($request->filled('search'), function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                  ->orWhere('code', 'like', '%' . $request->search . '%');
+                $q->where(function ($inner) use ($request) {
+                    $inner->where('name', 'like', '%' . $request->search . '%')
+                          ->orWhere('code', 'like', '%' . $request->search . '%');
+                });
             })
             ->when($request->filled('type'), fn ($q) => $q->where('type', $request->type))
-            ->when($request->filled('is_active'), fn ($q) => $q->where('is_active', $request->boolean('is_active')))
+            ->when(
+                $request->filled('is_active'),
+                fn ($q) => $q->where('is_active', $request->boolean('is_active'))
+            )
             ->orderByDesc('priority')
             ->orderByDesc('created_at')
             ->paginate(10)
@@ -56,12 +61,12 @@ class DiscountController extends Controller
 
     public function store(StoreDiscountRequest $request)
     {
-        try {
-            DB::beginTransaction();
+        DB::beginTransaction();
 
-            $discount = DiscountType::create($request->safe()->except([
-                'store_ids', 'applicabilities', 'requirements', 'rewards',
-            ]));
+        try {
+            $discount = DiscountType::create(
+                $request->safe()->except(['store_ids', 'applicabilities', 'requirements', 'rewards'])
+            );
 
             $this->syncStores($discount, $request->store_ids ?? []);
             $this->syncApplicabilities($discount, $request->applicabilities ?? []);
@@ -70,11 +75,17 @@ class DiscountController extends Controller
 
             DB::commit();
 
-            return redirect()->route('discounts.index')->with('success', 'Promo berhasil dibuat!');
-        } catch (\Exception $e) {
-            DB::rollBack();
+            return redirect()
+                ->route('discounts.index')
+                ->with('success', 'Promo berhasil dibuat!');
 
-            return back()->with('error', 'Gagal menyimpan: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            report($e);
+
+            return back()
+                ->withInput()
+                ->with('error', 'Gagal menyimpan promo: ' . $e->getMessage());
         }
     }
 
@@ -110,13 +121,14 @@ class DiscountController extends Controller
 
     public function update(UpdateDiscountRequest $request, DiscountType $discount)
     {
+        DB::beginTransaction();
+
         try {
-            DB::beginTransaction();
+            $discount->update(
+                $request->safe()->except(['store_ids', 'applicabilities', 'requirements', 'rewards'])
+            );
 
-            $discount->update($request->safe()->except([
-                'store_ids', 'applicabilities', 'requirements', 'rewards',
-            ]));
-
+            // FIX: syncStores menggunakan metode yang sama — delete lalu re-insert
             $this->syncStores($discount, $request->store_ids ?? []);
 
             $discount->applicabilities()->delete();
@@ -125,8 +137,8 @@ class DiscountController extends Controller
             $discount->requirements()->delete();
             $this->syncRequirements($discount, $request->requirements ?? []);
 
-            // Delete pools first (no cascade via Laravel automatically)
-            foreach ($discount->rewards as $reward) {
+            // Hapus pools terlebih dahulu (tidak ada cascadeOnDelete otomatis via Eloquent di sini)
+            foreach ($discount->rewards()->with('pools')->get() as $reward) {
                 $reward->pools()->delete();
             }
             $discount->rewards()->delete();
@@ -134,11 +146,17 @@ class DiscountController extends Controller
 
             DB::commit();
 
-            return redirect()->route('discounts.index')->with('success', 'Promo diperbarui!');
-        } catch (\Exception $e) {
-            DB::rollBack();
+            return redirect()
+                ->route('discounts.index')
+                ->with('success', 'Promo berhasil diperbarui!');
 
-            return back()->with('error', 'Gagal update: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            report($e);
+
+            return back()
+                ->withInput()
+                ->with('error', 'Gagal memperbarui promo: ' . $e->getMessage());
         }
     }
 
@@ -148,9 +166,32 @@ class DiscountController extends Controller
 
     public function destroy(DiscountType $discount)
     {
-        $discount->delete();
+        DB::beginTransaction();
 
-        return back()->with('success', 'Promo dihapus!');
+        try {
+            // Hapus relasi nested sebelum soft-delete
+            foreach ($discount->rewards()->with('pools')->get() as $reward) {
+                $reward->pools()->delete();
+            }
+            $discount->rewards()->delete();
+            $discount->requirements()->delete();
+            $discount->applicabilities()->delete();
+
+            // FIX: delete store pivot rows (tabel discount_stores tidak soft-delete)
+            $discount->stores()->delete();
+
+            $discount->delete(); // soft delete
+
+            DB::commit();
+
+            return back()->with('success', 'Promo berhasil dihapus!');
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            report($e);
+
+            return back()->with('error', 'Gagal menghapus promo: ' . $e->getMessage());
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -158,34 +199,57 @@ class DiscountController extends Controller
     // -------------------------------------------------------------------------
 
     /**
-     * Master data required by Create & Edit forms.
-     * Variant = perfume name, Intensity = EDT/EDP/EXT, Size = ml size
+     * Master data untuk form Create & Edit.
+     * Variant = nama parfum, Intensity = EDT/EDP/EXT, Size = ukuran ml
      */
     private function formData(): array
     {
         return [
-            'stores'      => Store::select('id', 'name')->where('is_active', true)->orderBy('name')->get(),
-            'variants'    => Variant::select('id', 'name')->where('is_active', true)->orderBy('sort_order')->get(),
-            'intensities' => Intensity::select('id', 'name', 'code')->where('is_active', true)->orderBy('sort_order')->get(),
-            'sizes'       => Size::select('id', 'name', 'volume_ml')->where('is_active', true)->orderBy('sort_order')->get(),
+            'stores'      => Store::select('id', 'name')
+                                ->where('is_active', true)
+                                ->orderBy('name')
+                                ->get(),
+            'variants'    => Variant::select('id', 'name')
+                                ->where('is_active', true)
+                                ->orderBy('sort_order')
+                                ->get(),
+            'intensities' => Intensity::select('id', 'name', 'code')
+                                ->where('is_active', true)
+                                ->orderBy('sort_order')
+                                ->get(),
+            'sizes'       => Size::select('id', 'name', 'volume_ml')
+                                ->where('is_active', true)
+                                ->orderBy('sort_order')
+                                ->get(),
         ];
     }
 
-    /** Sync store assignments */
+    /**
+     * Sync store assignments.
+     * FIX: gunakan upsert-safe pattern — delete then re-insert
+     * agar tidak bentrok dengan unique constraint (discount_type_id, store_id).
+     */
     private function syncStores(DiscountType $discount, array $storeIds): void
     {
-        $discount->stores()->delete();
+        // Hapus semua baris lama untuk discount ini
+        DB::table('discount_stores')
+            ->where('discount_type_id', $discount->id)
+            ->delete();
 
         if (empty($storeIds)) {
             return;
         }
 
+        // De-duplicate untuk menghindari insert duplikat
+        $uniqueStoreIds = array_values(array_unique($storeIds));
+
         $rows = array_map(fn ($id) => [
+            'id'               => (string) \Illuminate\Support\Str::uuid(),
             'discount_type_id' => $discount->id,
             'store_id'         => $id,
             'created_at'       => now(),
             'updated_at'       => now(),
-        ], $storeIds);
+        ], $uniqueStoreIds);
 
         DB::table('discount_stores')->insert($rows);
     }
@@ -219,7 +283,7 @@ class DiscountController extends Controller
 
     /**
      * Sync rewards + nested pool items.
-     * Pools are only created when reward.is_pool = true.
+     * Pool hanya dibuat jika reward.is_pool = true.
      */
     private function syncRewardsWithPools(DiscountType $discount, array $rewards): void
     {
@@ -231,8 +295,8 @@ class DiscountController extends Controller
                 'intensity_id'        => $rewardData['intensity_id'] ?? null,
                 'size_id'             => $rewardData['size_id'] ?? null,
                 'reward_quantity'     => $rewardData['reward_quantity'] ?? 1,
-                'customer_can_choose' => $rewardData['customer_can_choose'] ?? false,
-                'is_pool'             => $rewardData['is_pool'] ?? false,
+                'customer_can_choose' => (bool) ($rewardData['customer_can_choose'] ?? false),
+                'is_pool'             => (bool) ($rewardData['is_pool'] ?? false),
                 'max_choices'         => $rewardData['max_choices'] ?? null,
                 'discount_percentage' => $rewardData['discount_percentage'] ?? null,
                 'fixed_price'         => $rewardData['fixed_price'] ?? null,
@@ -250,7 +314,7 @@ class DiscountController extends Controller
                         'image_url'    => $poolItem['image_url'] ?? null,
                         'fixed_price'  => $poolItem['fixed_price'] ?? 0,
                         'probability'  => $poolItem['probability'] ?? null,
-                        'is_active'    => $poolItem['is_active'] ?? true,
+                        'is_active'    => (bool) ($poolItem['is_active'] ?? true),
                         'sort_order'   => $poolItem['sort_order'] ?? $index,
                     ]);
                 }

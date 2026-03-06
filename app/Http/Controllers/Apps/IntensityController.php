@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Apps;
 
 use Inertia\Inertia;
+use Inertia\Response;
 use App\Models\Intensity;
 use App\Models\Size;
 use App\Models\IntensitySizeQuantity;
@@ -11,15 +12,12 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Validator;
-use App\Http\Requests\Intensity\StoreIntensityRequest;
-use App\Http\Requests\Intensity\UpdateIntensityRequest;
-use Inertia\Response;
 
 class IntensityController extends Controller
 {
-    // -------------------------------------------------------------------------
-    // Index
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // INDEX
+    // =========================================================================
 
     public function index(Request $request): Response
     {
@@ -33,21 +31,19 @@ class IntensityController extends Controller
             ->ordered()
             ->paginate($request->input('per_page', 12))
             ->withQueryString()
-            ->through(fn ($intensity) => [
-                'id'                  => $intensity->id,
-                'code'                => $intensity->code,
-                'name'                => $intensity->name,
-                'oil_ratio'           => $intensity->oil_ratio,       // string "1 : 2"
-                'alcohol_ratio'       => $intensity->alcohol_ratio,   // string "2 : 1"
-                'ratio_display'       => $intensity->ratio_display,
-                'oil_percentage'      => $intensity->oil_percentage,  // float untuk bar chart
-                'sort_order'          => $intensity->sort_order,
-                'is_active'           => $intensity->is_active,
-                'status_label'        => $intensity->status_label,
-                'concentration_level' => $intensity->concentration_level,
-                'created_at'          => $intensity->created_at->format('d M Y'),
-                'size_quantities'     => $intensity->sizeQuantities()
-                    ->with('size')
+            ->through(fn (Intensity $intensity) => [
+                'id'              => $intensity->id,
+                'code'            => $intensity->code,
+                'name'            => $intensity->name,
+                'oil_ratio'       => $intensity->oil_ratio,
+                'alcohol_ratio'   => $intensity->alcohol_ratio,
+                'ratio_display'   => $intensity->oil_ratio . ' : ' . $intensity->alcohol_ratio,
+                'sort_order'      => $intensity->sort_order,
+                'is_active'       => $intensity->is_active,
+                'status_label'    => $intensity->status_label,
+                'created_at'      => $intensity->created_at->format('d M Y'),
+                'size_quantities' => $intensity->sizeQuantities()
+                    ->with('size:id,name,volume_ml')
                     ->get()
                     ->map(fn ($q) => [
                         'size_name'        => $q->size->name,
@@ -68,36 +64,33 @@ class IntensityController extends Controller
         ]);
     }
 
-    // -------------------------------------------------------------------------
-    // Create
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // CREATE
+    // =========================================================================
 
     public function create(): Response
     {
-        $sizes = Size::where('is_active', true)
-            ->orderBy('volume_ml')
-            ->get(['id', 'name', 'volume_ml']);
-
         return Inertia::render('Dashboard/Intensities/Create', [
-            'sizes' => $sizes,
+            'sizes' => $this->getActiveSizes(),
         ]);
     }
 
-    // -------------------------------------------------------------------------
-    // Store
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // STORE
+    // =========================================================================
 
-    public function store(StoreIntensityRequest $request): RedirectResponse
+    public function store(Request $request): RedirectResponse
     {
-        $this->validateSizeQuantities($request);
+        $validated   = $this->validateIntensity($request);
+        $sizeQtyData = $this->validateAndFilterSizeQty($request);
 
         try {
             DB::beginTransaction();
 
-            $intensity = Intensity::create($request->validated());
+            $intensity = Intensity::create($validated);
 
-            if ($request->filled('size_quantities')) {
-                $this->saveSizeQuantities($intensity->id, $request->size_quantities);
+            if (!empty($sizeQtyData)) {
+                $this->saveSizeQuantities($intensity->id, $sizeQtyData);
             }
 
             DB::commit();
@@ -110,70 +103,71 @@ class IntensityController extends Controller
             DB::rollBack();
             report($e);
 
-            return back()
-                ->withInput()
-                ->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
+            return back()->withInput()->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Edit
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // SHOW → redirect ke edit
+    // =========================================================================
+
+    public function show(Intensity $intensity): RedirectResponse
+    {
+        return redirect()->route('intensities.edit', $intensity);
+    }
+
+    // =========================================================================
+    // EDIT
+    // =========================================================================
 
     public function edit(Intensity $intensity): Response
     {
-        $sizes = Size::where('is_active', true)
-            ->orderBy('volume_ml')
-            ->get(['id', 'name', 'volume_ml']);
+        $sizes = $this->getActiveSizes();
 
         $existingQty = IntensitySizeQuantity::where('intensity_id', $intensity->id)
-            ->with('size')
             ->get()
             ->keyBy('size_id');
 
-        $sizeQuantities = $sizes->map(function ($size) use ($existingQty) {
-            $qty = $existingQty->get($size->id);
-            return [
-                'size_id'          => $size->id,
-                'size_name'        => $size->name,
-                'volume_ml'        => $size->volume_ml,
-                'oil_quantity'     => $qty?->oil_quantity ?? 0,
-                'alcohol_quantity' => $qty?->alcohol_quantity ?? 0,
-                'total_volume'     => $qty?->total_volume ?? $size->volume_ml,
-            ];
-        });
+        $sizeQuantities = $sizes->map(fn ($size) => [
+            'size_id'          => $size->id,
+            'size_name'        => $size->name,
+            'volume_ml'        => $size->volume_ml,
+            'oil_quantity'     => $existingQty->get($size->id)?->oil_quantity     ?? 0,
+            'alcohol_quantity' => $existingQty->get($size->id)?->alcohol_quantity ?? 0,
+            'total_volume'     => $existingQty->get($size->id)?->total_volume     ?? $size->volume_ml,
+        ]);
 
         return Inertia::render('Dashboard/Intensities/Edit', [
             'intensity' => [
-                'id'           => $intensity->id,
-                'code'         => $intensity->code,
-                'name'         => $intensity->name,
-                'oil_ratio'    => $intensity->oil_ratio,     // string "1 : 2"
-                'alcohol_ratio'=> $intensity->alcohol_ratio, // string "2 : 1"
-                'sort_order'   => $intensity->sort_order,
-                'is_active'    => $intensity->is_active,
+                'id'            => $intensity->id,
+                'code'          => $intensity->code,
+                'name'          => $intensity->name,
+                'oil_ratio'     => $intensity->oil_ratio,
+                'alcohol_ratio' => $intensity->alcohol_ratio,
+                'sort_order'    => $intensity->sort_order,
+                'is_active'     => $intensity->is_active,
             ],
             'sizes'           => $sizes,
             'size_quantities' => $sizeQuantities,
         ]);
     }
 
-    // -------------------------------------------------------------------------
-    // Update
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // UPDATE
+    // =========================================================================
 
-    public function update(UpdateIntensityRequest $request, Intensity $intensity): RedirectResponse
+    public function update(Request $request, Intensity $intensity): RedirectResponse
     {
-        $this->validateSizeQuantities($request);
+        $validated   = $this->validateIntensity($request, $intensity->id);
+        $sizeQtyData = $this->validateAndFilterSizeQty($request);
 
         try {
             DB::beginTransaction();
 
-            $intensity->update($request->validated());
+            $intensity->update($validated);
 
-            if ($request->filled('size_quantities')) {
-                $this->saveSizeQuantities($intensity->id, $request->size_quantities);
-            }
+            // Selalu sync: hapus lama, insert baru
+            $this->saveSizeQuantities($intensity->id, $sizeQtyData);
 
             DB::commit();
 
@@ -185,21 +179,19 @@ class IntensityController extends Controller
             DB::rollBack();
             report($e);
 
-            return back()
-                ->withInput()
-                ->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
+            return back()->withInput()->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Destroy
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // DESTROY
+    // =========================================================================
 
     public function destroy(Intensity $intensity): RedirectResponse
     {
         try {
             DB::beginTransaction();
-            $intensity->delete();
+            $intensity->delete(); // cascade akan hapus IntensitySizeQuantity
             DB::commit();
 
             return redirect()
@@ -210,14 +202,13 @@ class IntensityController extends Controller
             DB::rollBack();
             report($e);
 
-            return back()
-                ->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
+            return back()->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Bulk Delete
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // BULK DELETE
+    // =========================================================================
 
     public function bulkDelete(Request $request): RedirectResponse
     {
@@ -250,18 +241,47 @@ class IntensityController extends Controller
             DB::rollBack();
             report($e);
 
-            return back()
-                ->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
+            return back()->with('error', 'Terjadi kesalahan sistem. Silakan coba lagi.');
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Private Helpers
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // PRIVATE HELPERS
+    // =========================================================================
 
-    private function validateSizeQuantities(Request $request): void
+    /**
+     * Ambil semua size aktif, diurutkan berdasarkan volume.
+     */
+    private function getActiveSizes()
     {
-        if (!$request->filled('size_quantities')) return;
+        return Size::where('is_active', true)
+            ->orderBy('volume_ml')
+            ->get(['id', 'name', 'volume_ml']);
+    }
+
+    /**
+     * Validasi field utama Intensity.
+     */
+    private function validateIntensity(Request $request, ?string $ignoreId = null): array
+    {
+        return $request->validate([
+            'code'          => 'required|string|max:20|unique:intensities,code' . ($ignoreId ? ",{$ignoreId}" : ''),
+            'name'          => 'required|string|max:100',
+            'oil_ratio'     => 'required|string|max:10',
+            'alcohol_ratio' => 'required|string|max:10',
+            'sort_order'    => 'required|integer|min:0',
+            'is_active'     => 'boolean',
+        ]);
+    }
+
+    /**
+     * Validasi size_quantities dari request.
+     * Hanya mengambil field DB yang diperlukan.
+     * Baris dengan oil=0 DAN alcohol=0 di-skip (belum diisi).
+     */
+    private function validateAndFilterSizeQty(Request $request): array
+    {
+        if (!$request->filled('size_quantities')) return [];
 
         $validator = Validator::make($request->all(), [
             'size_quantities'                    => 'array',
@@ -275,31 +295,53 @@ class IntensityController extends Controller
             abort(422, $validator->errors()->first());
         }
 
+        $result = [];
+
         foreach ($request->size_quantities as $qty) {
-            $sum = (int) $qty['oil_quantity'] + (int) $qty['alcohol_quantity'];
-            if ($sum !== (int) $qty['total_volume']) {
-                abort(422, "Ukuran {$qty['total_volume']}ml: oil ({$qty['oil_quantity']}) + alcohol ({$qty['alcohol_quantity']}) = {$sum}, harus = {$qty['total_volume']}");
+            $oil     = (int) $qty['oil_quantity'];
+            $alcohol = (int) $qty['alcohol_quantity'];
+            $total   = (int) $qty['total_volume'];
+
+            // Skip baris yang belum diisi
+            if ($oil === 0 && $alcohol === 0) continue;
+
+            // oil + alcohol harus = total_volume
+            if (($oil + $alcohol) !== $total) {
+                abort(422, "Ukuran {$total}ml: bibit ({$oil}) + alkohol ({$alcohol}) = " . ($oil + $alcohol) . ", harus = {$total}");
             }
+
+            $result[] = [
+                'size_id'          => $qty['size_id'],
+                'oil_quantity'     => $oil,
+                'alcohol_quantity' => $alcohol,
+                'total_volume'     => $total,
+            ];
         }
+
+        return $result;
     }
 
+    /**
+     * Hapus semua qty lama untuk intensity ini, lalu bulk insert baru.
+     *
+     * FIX: Menggunakan IntensitySizeQuantity::bulkInsert() yang men-generate
+     * UUID secara manual per-row agar tidak null saat bypass Eloquent events.
+     * (Model::insert() tidak trigger HasUuids::creating() event)
+     */
     private function saveSizeQuantities(string $intensityId, array $sizeQuantities): void
     {
+        // Hapus semua data lama
         IntensitySizeQuantity::where('intensity_id', $intensityId)->delete();
 
-        foreach ($sizeQuantities as $qty) {
-            if ((int) $qty['oil_quantity'] === 0 && (int) $qty['alcohol_quantity'] === 0) {
-                continue;
-            }
+        if (empty($sizeQuantities)) return;
 
-            IntensitySizeQuantity::create([
-                'intensity_id'     => $intensityId,
-                'size_id'          => $qty['size_id'],
-                'oil_quantity'     => (int) $qty['oil_quantity'],
-                'alcohol_quantity' => (int) $qty['alcohol_quantity'],
-                'total_volume'     => (int) $qty['total_volume'],
-                'is_active'        => true,
-            ]);
-        }
+        // Tambahkan intensity_id ke setiap baris
+        $rows = array_map(fn (array $qty) => array_merge(
+            $qty,
+            ['intensity_id' => $intensityId]
+        ), $sizeQuantities);
+
+        // Bulk insert dengan UUID yang di-generate manual (production-safe)
+        IntensitySizeQuantity::bulkInsert($rows);
     }
 }

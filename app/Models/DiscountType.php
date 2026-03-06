@@ -18,6 +18,8 @@ class DiscountType extends Model
         'buy_quantity', 'get_quantity', 'get_product_type',
         'min_purchase_amount', 'min_purchase_quantity', 'max_discount_amount',
         'start_date', 'end_date',
+        // FIX: tambah start_time & end_time sesuai migration
+        'start_time', 'end_time',
         'is_game_reward', 'game_probability',
         'priority', 'is_combinable', 'is_active',
         'description', 'terms_conditions',
@@ -43,6 +45,8 @@ class DiscountType extends Model
         // date fields
         'start_date'            => 'date',
         'end_date'              => 'date',
+        // time fields — disimpan sebagai string HH:MM:SS, tidak perlu cast khusus
+        // 'start_time' dan 'end_time' akan dikembalikan sebagai string
         // json
         'terms_conditions'      => 'array',
     ];
@@ -88,9 +92,23 @@ class DiscountType extends Model
 
     public function scopeCurrentlyValid($query)
     {
-        return $query->active()
-            ->where(fn($q) => $q->whereNull('start_date')->orWhereDate('start_date', '<=', today()))
-            ->where(fn($q) => $q->whereNull('end_date')->orWhereDate('end_date', '>=', today()));
+        $now   = now();
+        $today = $now->toDateString();
+        $time  = $now->format('H:i:s');
+
+        return $query
+            ->active()
+            // Tanggal berlaku
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereDate('start_date', '<=', $today))
+            ->where(fn ($q) => $q->whereNull('end_date')->orWhereDate('end_date', '>=', $today))
+            // Happy hour: jika start_time/end_time diset, cek range jam
+            ->where(fn ($q) => $q
+                ->whereNull('start_time')
+                ->orWhere(fn ($inner) => $inner
+                    ->whereTime('start_time', '<=', $time)
+                    ->whereTime('end_time', '>=', $time)
+                )
+            );
     }
 
     // -------------------------------------------------------------------------
@@ -114,11 +132,38 @@ class DiscountType extends Model
     {
         if (! $this->is_active) return false;
 
-        $today = today();
+        $now   = now();
+        $today = $now->toDateString();
 
-        if ($this->start_date && $this->start_date->gt($today)) return false;
-        if ($this->end_date && $this->end_date->lt($today)) return false;
+        if ($this->start_date && $this->start_date->toDateString() > $today) return false;
+        if ($this->end_date && $this->end_date->toDateString() < $today) return false;
+
+        // Cek happy hour jika dikonfigurasi
+        if ($this->start_time && $this->end_time) {
+            $currentTime = $now->format('H:i:s');
+            // Normalisasi ke HH:MM:SS
+            $start = strlen($this->start_time) === 5 ? $this->start_time . ':00' : $this->start_time;
+            $end   = strlen($this->end_time) === 5 ? $this->end_time . ':00' : $this->end_time;
+
+            if ($currentTime < $start || $currentTime > $end) return false;
+        }
 
         return true;
+    }
+
+    /**
+     * Format start_time & end_time ke HH:MM untuk ditampilkan di frontend.
+     * Menghapus detik jika ada (:SS).
+     */
+    public function getStartTimeFormattedAttribute(): ?string
+    {
+        if (! $this->start_time) return null;
+        return substr($this->start_time, 0, 5);
+    }
+
+    public function getEndTimeFormattedAttribute(): ?string
+    {
+        if (! $this->end_time) return null;
+        return substr($this->end_time, 0, 5);
     }
 }

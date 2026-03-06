@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
  * PERUBAHAN DARI VERSI LAMA:
  *   discount_types.min_purchase_amount  : unsignedBigInteger → decimal(15,2)
  *   discount_types.max_discount_amount  : unsignedBigInteger → decimal(15,2)
+ *   discount_types.start_time / end_time: kolom baru (happy hour)
  *   discount_rewards.fixed_price        : unsignedBigInteger → decimal(15,2)
  *   discount_reward_pools.fixed_price   : decimal(15,2) ✓ sudah benar
  *   discount_usages.discount_amount / original_amount / final_amount :
@@ -18,7 +19,8 @@ use Illuminate\Support\Facades\Schema;
  *
  * BUG FIX KRITIS:
  *   discount_usages.customer_id: FK ke customers (BUKAN users!)
- *   → FK constraint ditambahkan di migration 010 setelah tabel customers dibuat
+ *   discount_usages.order_id: FK ke sales
+ *   → Kedua FK constraint ditambahkan di migration 010 setelah tabel-tabel tersebut dibuat
  */
 return new class extends Migration
 {
@@ -39,7 +41,6 @@ return new class extends Migration
                 'bundle',
             ])->default('percentage');
 
-            // ★ decimal(15,2): bisa 15,50% atau Rp 12.000,50
             $table->decimal('value', 15, 2)->default(0)
                   ->comment('Nilai: angka % (percentage) atau rupiah (fixed_amount)');
 
@@ -56,7 +57,6 @@ return new class extends Migration
                 'choose_variant',
             ])->nullable();
 
-            // ★ decimal(15,2) → support Rp 150.000,50
             $table->decimal('min_purchase_amount', 15, 2)->nullable()
                   ->comment('Minimal total belanja agar diskon berlaku (rupiah)');
             $table->unsignedInteger('min_purchase_quantity')->nullable()
@@ -66,6 +66,12 @@ return new class extends Migration
 
             $table->date('start_date')->nullable();
             $table->date('end_date')->nullable();
+
+            // ★ Baru: jam berlaku harian (happy hour)
+            $table->time('start_time')->nullable()
+                  ->comment('Jam mulai berlaku; null = sepanjang hari');
+            $table->time('end_time')->nullable()
+                  ->comment('Jam selesai berlaku; null = sepanjang hari');
 
             $table->boolean('is_game_reward')->default(false);
             $table->unsignedTinyInteger('game_probability')->nullable()
@@ -107,7 +113,7 @@ return new class extends Migration
                   ->references('id')->on('sizes')->cascadeOnDelete();
 
             $table->index('discount_type_id');
-            $table->index('size_id');       // sering filter by size (P50 vs P10)
+            $table->index('size_id');
         });
 
         // ── DISCOUNT STORES ───────────────────────────────────────────────────
@@ -169,7 +175,6 @@ return new class extends Migration
 
             $table->decimal('discount_percentage', 5, 2)->nullable()
                   ->comment('100,00 = gratis; 50,00 = diskon 50%');
-            // ★ decimal(15,2)
             $table->decimal('fixed_price', 15, 2)->nullable()
                   ->comment('Override harga reward (0,00 = gratis; support desimal)');
 
@@ -200,7 +205,6 @@ return new class extends Migration
             $table->string('label', 255);
             $table->string('image_url', 500)->nullable();
 
-            // ★ decimal(15,2)
             $table->decimal('fixed_price', 15, 2)->nullable()
                   ->comment('Override harga item ini (0,00 = gratis; null = ikut discount_rewards)');
             $table->unsignedTinyInteger('probability')->nullable()
@@ -222,23 +226,25 @@ return new class extends Migration
                   ->references('id')->on('sizes')->nullOnDelete();
 
             $table->index('discount_reward_id');
-            $table->index(['discount_reward_id', 'is_active', 'sort_order'],
-                          'idx_drp_active_sort');
+            $table->index(
+                ['discount_reward_id', 'is_active', 'sort_order'],
+                'idx_drp_active_sort'
+            );
         });
 
         // ── DISCOUNT USAGES ───────────────────────────────────────────────────
-        // ★ BUG FIX: customer_id FK ke customers (BUKAN users!)
-        //   FK constraint ditambahkan di migration 010 setelah customers dibuat
+        // BUG FIX: customer_id FK ke customers (BUKAN users!)
+        //          order_id FK ke sales
+        //          → Kedua FK constraint ditambahkan di migration 010
         Schema::create('discount_usages', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('discount_type_id');
             $table->uuid('order_id')->nullable()
-                  ->comment('FK ke sales.id — FK constraint ditambah di migration 010');
+                  ->comment('FK ke sales.id — constraint ditambah di migration 010');
             $table->uuid('store_id');
             $table->uuid('customer_id')->nullable()
-                  ->comment('FK ke customers.id (BUKAN users!) — FK ditambah di migration 010');
+                  ->comment('FK ke customers.id (BUKAN users!) — constraint ditambah di migration 010');
 
-            // ★ decimal(15,2) → support Rp 12.000,59
             $table->decimal('discount_amount', 15, 2)
                   ->comment('Nominal diskon yang diberikan (rupiah)');
             $table->decimal('original_amount', 15, 2)

@@ -63,8 +63,18 @@ class Size extends Model
     public function scopeSearch($query, string $search)
     {
         return $query->where(function ($q) use ($search) {
-            $q->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($search) . '%'])
-              ->orWhereRaw('CAST(volume_ml AS CHAR) LIKE ?', ["%{$search}%"]);
+            $q->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($search) . '%']);
+
+            // Tambahkan kondisi pencarian volume_ml secara numerik jika input adalah angka
+            // Atau sebagai string jika input mungkin mengandung teks lain yang relevan
+            if (is_numeric($search)) {
+                $q->orWhere('volume_ml', (int) $search); // Cari volume yang sama persis
+                // Atau untuk pencarian "mengandung", bisa menggunakan:
+                // $q->orWhere('volume_ml', 'LIKE', "%{$search}%");
+            } else {
+                // Jika input bukan angka, kita tetap bisa mencari bagian dari angka
+                $q->orWhereRaw('CAST(volume_ml AS CHAR) LIKE ?', ["%{$search}%"]);
+            }
         });
     }
 
